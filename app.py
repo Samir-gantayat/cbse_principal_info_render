@@ -30,7 +30,94 @@ HTML_PAGE = """
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* --- same CSS styles as before --- */
+    :root{
+        --card-bg: rgba(255,255,255,0.95);
+        --card-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        --card-shadow-hover: 0 16px 40px rgba(0,0,0,0.22);
+        --accent: #2c7be5;
+        --accent-2: #6c5ce7;
+        --danger: #d9534f;
+        --success: #20c997;
+        --muted: #6b7280;
+        --text: #111827;
+        --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin:0; }
+    body {
+        font-family: 'Inter', sans-serif;
+        color: var(--text);
+        background:
+            linear-gradient( to bottom right, rgba(32,33,36,0.45), rgba(32,33,36,0.65) ),
+            url('https://images.unsplash.com/photo-1516979187457-637abb4f9353?q=80&w=1600&auto=format&fit=crop') center/cover fixed no-repeat;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 20px;
+    }
+    .container { width: min(1100px, 100%); }
+    .hero { text-align: center; margin-bottom: 26px; }
+    .title { font-size: clamp(26px, 4vw, 40px); font-weight: 700; color: #fff; text-shadow: 0 2px 20px rgba(0,0,0,0.35); margin-bottom:12px; }
+    .subtitle { color: #e5e7eb; margin-bottom: 22px; }
+    .search-wrap { display: flex; justify-content: center; }
+    .search {
+        width: min(820px, 100%);
+        background: var(--card-bg);
+        border-radius: 999px;
+        padding: 14px;
+        box-shadow: var(--card-shadow);
+        display: flex;
+        gap: 10px;
+    }
+    .search input {
+        flex: 1; padding: 16px 20px; border: none; outline: none;
+        font-size: 18px; border-radius: 999px; background: transparent;
+    }
+    .search button {
+        padding: 14px 22px;
+        border: none; border-radius: 999px;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        color: white; font-weight: 600; cursor: pointer;
+        box-shadow: 0 8px 20px rgba(44,123,229,0.45);
+    }
+    .alert {
+        background: rgba(255,255,255,0.92);
+        padding: 14px 16px;
+        border-radius: var(--radius);
+        margin-top: 16px;
+        box-shadow: var(--card-shadow);
+    }
+    .alert.error { border-left: 6px solid var(--danger); }
+    .alert.success { border-left: 6px solid var(--success); }
+    .results {
+        margin-top: 26px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+    }
+    .card {
+        background: var(--card-bg);
+        border-radius: var(--radius);
+        padding: 18px;
+        box-shadow: var(--card-shadow);
+        transition: transform .18s ease, box-shadow .22s ease;
+        overflow: hidden;
+    }
+    .card:hover { transform: translateY(-4px); box-shadow: var(--card-shadow-hover); }
+    .card .head {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: .12em;
+        color: var(--muted);
+        margin-bottom: 8px;
+        font-weight: 700;
+    }
+    .card .value {
+        font-size: 18px;
+        font-weight: 600;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
 </style>
 </head>
 <body>
@@ -88,7 +175,6 @@ def fetch_from_cbse(aff_no):
             val = get_val(f"lblstu{i}")
             if val.isdigit():
                 total_strength += int(val)
-
         total_strength = str(total_strength) if total_strength > 0 else "Not Found"
 
         # Fee structure calculation
@@ -129,7 +215,6 @@ def save_to_csv(data):
             "Mail": data["mail"]
         }])
         new_row.to_csv(CSV_FILE, mode="a", header=False, index=False)
-        # Reload into memory
         school_df = pd.read_csv(
             CSV_FILE, dtype=str, on_bad_lines="skip", engine="python"
         ).fillna("Not Found")
@@ -146,13 +231,11 @@ def index():
         if not aff_no:
             error = "Please enter a valid Affiliation Number."
         else:
-            # Step 1: Try SARAS
             data = fetch_from_cbse(aff_no)
 
             if data:
-                save_to_csv(data)  # store basic result in local CSV
+                save_to_csv(data)  # store basic info in local CSV
             else:
-                # Step 2: fallback to CSV
                 row = school_df.loc[school_df["Aff No"] == aff_no]
                 if row.empty:
                     error = "No information found for this Affiliation Number."
