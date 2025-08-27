@@ -20,7 +20,7 @@ if not os.path.exists(CSV_FILE):
     pd.DataFrame(columns=REQUIRED_COLS).to_csv(CSV_FILE, index=False)
 
 if not os.path.exists(MATCHED_FILE):
-    pd.DataFrame(columns=["Aff No", "Person"]).to_csv(MATCHED_FILE, index=False)
+    pd.DataFrame(columns=["Aff No", "Person", "SCHOOL_ID"]).to_csv(MATCHED_FILE, index=False)
 
 # Load DataFrames
 school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
@@ -35,58 +35,17 @@ HTML_PAGE = """
 <title>School Info Explorer</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-    body {
-        font-family: 'Inter', sans-serif;
-        background: #f3f4f6;
-        margin: 0;
-        padding: 20px;
-        display: flex;
-        justify-content: center;
-    }
+    body { font-family: 'Inter', sans-serif; background: #f3f4f6; margin: 0; padding: 20px; display: flex; justify-content: center; }
     .container { width: min(900px, 100%); }
     .hero { text-align: center; margin-bottom: 20px; }
     .title { font-size: 32px; font-weight: 700; margin-bottom: 10px; }
     .subtitle { color: #555; margin-bottom: 20px; }
     .search-wrap { display: flex; justify-content: center; }
-    .search {
-        width: 100%;
-        max-width: 700px;
-        display: flex;
-        background: #fff;
-        border-radius: 50px;
-        padding: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .search input {
-        flex: 1;
-        border: none;
-        padding: 12px 16px;
-        font-size: 16px;
-        border-radius: 50px;
-        outline: none;
-    }
-    .search button {
-        background: linear-gradient(135deg, #2c7be5, #6c5ce7);
-        border: none;
-        color: #fff;
-        font-weight: 600;
-        border-radius: 50px;
-        padding: 12px 20px;
-        cursor: pointer;
-    }
-    .box {
-        background: #fff;
-        border-radius: 14px;
-        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
-        padding: 20px;
-        margin-top: 20px;
-    }
-    .box h2 {
-        font-size: 20px;
-        margin-bottom: 15px;
-        border-bottom: 2px solid #eee;
-        padding-bottom: 5px;
-    }
+    .search { width: 100%; max-width: 700px; display: flex; background: #fff; border-radius: 50px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .search input { flex: 1; border: none; padding: 12px 16px; font-size: 16px; border-radius: 50px; outline: none; }
+    .search button { background: linear-gradient(135deg, #2c7be5, #6c5ce7); border: none; color: #fff; font-weight: 600; border-radius: 50px; padding: 12px 20px; cursor: pointer; }
+    .box { background: #fff; border-radius: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); padding: 20px; margin-top: 20px; }
+    .box h2 { font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
     .info-row { margin: 8px 0; }
     .label { font-weight: 600; color: #444; }
     .value { margin-left: 6px; color: #222; }
@@ -128,6 +87,9 @@ HTML_PAGE = """
         <div class="info-row"><span class="label">Website:</span> <a href="{{ data.website }}" target="_blank">{{ data.website }}</a></div>
         <div class="info-row"><span class="label">SARAS Link:</span> <a href="{{ data.saras_link }}" target="_blank">{{ data.saras_link }}</a></div>
         <div class="info-row"><span class="label">Lead Status:</span> <span class="value">{{ data.lead_status }}</span></div>
+        {% if data.school_id %}
+        <div class="info-row"><span class="label">School ID:</span> <span class="value">{{ data.school_id }}</span></div>
+        {% endif %}
         <div class="info-row">
             <a class="mail-link" target="_blank"
                href="https://mail.google.com/mail/?view=cm&fs=1&to={{ data.principal_email }},{{ data.school_email }}">
@@ -242,9 +204,12 @@ def index():
                 row = matched_df.loc[matched_df["Aff No"] == aff_no]
                 if not row.empty:
                     person = row.iloc[0].get("Person", "Assigned")
+                    school_id = row.iloc[0].get("SCHOOL_ID", "Code unavailable")
                     data["lead_status"] = f"Existing Lead — with {person}"
+                    data["school_id"] = school_id
                 else:
                     data["lead_status"] = "Unique Lead"
+                    data["school_id"] = None
 
     return render_template_string(HTML_PAGE, data=data, error=error, aff_no=aff_no)
 
