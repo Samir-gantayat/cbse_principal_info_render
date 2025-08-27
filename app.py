@@ -8,6 +8,7 @@ app = Flask(__name__)
 
 CSV_FILE = "schools.csv"
 MATCHED_FILE = "matched_schools.csv"
+V2_FILE = "v2_data.csv"
 
 # Ensure CSV exists with required columns
 REQUIRED_COLS = [
@@ -22,9 +23,13 @@ if not os.path.exists(CSV_FILE):
 if not os.path.exists(MATCHED_FILE):
     pd.DataFrame(columns=["Aff No", "Person", "SCHOOL_ID"]).to_csv(MATCHED_FILE, index=False)
 
+if not os.path.exists(V2_FILE):
+    pd.DataFrame(columns=[]).to_csv(V2_FILE, index=False)  # empty placeholder if file missing
+
 # Load DataFrames
 school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 matched_df = pd.read_csv(MATCHED_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
+v2_df = pd.read_csv(V2_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
 
 HTML_PAGE = """ 
 <!DOCTYPE html>
@@ -90,6 +95,17 @@ HTML_PAGE = """
         {% if data.school_id %}
         <div class="info-row"><span class="label">School ID:</span> <span class="value">{{ data.school_id }}</span></div>
         {% endif %}
+
+        {% if data.rounds %}
+        <div class="info-row"><span class="label">Rounds:</span></div>
+        <ul>
+            {% for r in data.rounds %}
+                <li>{{ r }}</li>
+            {% endfor %}
+        </ul>
+        <div class="info-row"><span class="label">Lead Owner:</span> <span class="value">{{ data.lead_owner }}</span></div>
+        {% endif %}
+
         <div class="info-row">
             <a class="mail-link" target="_blank"
                href="https://mail.google.com/mail/?view=cm&fs=1&to={{ data.principal_email }},{{ data.school_email }}">
@@ -109,13 +125,14 @@ def fetch_from_cbse(aff_no):
         resp = requests.get(url, timeout=10)
         if resp.status_code != 200:
             return None
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(resp.text, "html.parser")
 
         def get_val(_id):
             el = soup.find(id=_id)
             return el.get_text(strip=True) if el else "Not Found"
 
-        # Student strength = sum of lblstu1 … lblstu12
+        # Student strength
         total_strength = 0
         for i in range(1, 13):
             val = get_val(f"lblstu{i}")
@@ -128,7 +145,7 @@ def fetch_from_cbse(aff_no):
         oth = int(get_val("lblsecoth") or 0) if get_val("lblsecoth").isdigit() else 0
         tui = get_val("lblsectui")
         tui = int(tui) if tui.isdigit() else 0
-        if 0 < tui < 10000:  # treat as monthly, multiply by 12
+        if 0 < tui < 10000:
             tui *= 12
         fee_total = adm + dev + oth + tui
 
@@ -169,7 +186,7 @@ def save_to_csv(data):
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    global school_df, matched_df
+    global school_df, matched_df, v2_df
     data, error, aff_no = None, None, None
 
     if request.method == "POST":
@@ -178,7 +195,7 @@ def index():
             error = "Please enter a valid Affiliation Number."
         else:
             data = fetch_from_cbse(aff_no)
-            if not data:  # fallback to CSV
+            if not data:
                 row = school_df.loc[school_df["Aff No"] == aff_no]
                 if row.empty:
                     error = "No information found for this Affiliation Number."
@@ -197,7 +214,7 @@ def index():
                         "saras_link": f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
                     }
             else:
-                save_to_csv(data)  # save full info if unique
+                save_to_csv(data)
 
             # Check matched_schools
             if data:
@@ -207,9 +224,25 @@ def index():
                     school_id = row.iloc[0].get("SCHOOL_ID", "Code unavailable")
                     data["lead_status"] = f"Existing Lead — with {person}"
                     data["school_id"] = school_id
+
+                    # Fetch v2_data rounds info
+                    rounds_df = v2_df.loc[v2_df["School Code"] == school_id]
+                    rounds_list = []
+                    lead_owner = ""
+                    if not rounds_df.empty:
+                        rounds_df = rounds_df.sort_values(by="Type of Round")  # sort by round type
+                        for idx, r in rounds_df.iterrows():
+                            rounds_list.append(
+                                f"round {r['Type of Round']} - {r['Prelims Date']} - {r['Registration']} - {r['Participation']} - {r['Rep']}"
+                            )
+                        lead_owner = rounds_df.iloc[-1]['Rep']
+                    data["rounds"] = rounds_list
+                    data["lead_owner"] = lead_owner
                 else:
                     data["lead_status"] = "Unique Lead"
                     data["school_id"] = None
+                    data["rounds"] = None
+                    data["lead_owner"] = None
 
     return render_template_string(HTML_PAGE, data=data, error=error, aff_no=aff_no)
 
