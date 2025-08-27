@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import os
 from bs4 import BeautifulSoup
+import urllib.parse
 
 app = Flask(__name__)
 
@@ -10,7 +11,6 @@ CSV_FILE = "schools.csv"
 MATCHED_FILE = "matched_schools.csv"
 V2_FILE = "v2_data.csv"
 
-# Ensure CSV exists with required columns
 REQUIRED_COLS = [
     "School Name", "Aff No", "Principal Name", "Principal Number",
     "Principal Email", "School Email", "Address", "Website",
@@ -19,17 +19,15 @@ REQUIRED_COLS = [
 
 if not os.path.exists(CSV_FILE):
     pd.DataFrame(columns=REQUIRED_COLS).to_csv(CSV_FILE, index=False)
-
 if not os.path.exists(MATCHED_FILE):
     pd.DataFrame(columns=["Aff No", "Person", "SCHOOL_ID"]).to_csv(MATCHED_FILE, index=False)
-
 if not os.path.exists(V2_FILE):
-    pd.DataFrame(columns=[]).to_csv(V2_FILE, index=False)  # empty placeholder if file missing
+    pd.DataFrame(columns=["SCHOOL_ID","Type of Round","Prelims Date","Reg","Part","Rep"]).to_csv(V2_FILE, index=False)
 
-# Load DataFrames
+# Load CSVs
 school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 matched_df = pd.read_csv(MATCHED_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
-v2_df = pd.read_csv(V2_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
+v2_df = pd.read_csv(V2_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 
 HTML_PAGE = """ 
 <!DOCTYPE html>
@@ -40,81 +38,136 @@ HTML_PAGE = """
 <title>School Info Explorer</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-    body { font-family: 'Inter', sans-serif; background: #f3f4f6; margin: 0; padding: 20px; display: flex; justify-content: center; }
-    .container { width: min(900px, 100%); }
-    .hero { text-align: center; margin-bottom: 20px; }
-    .title { font-size: 32px; font-weight: 700; margin-bottom: 10px; }
-    .subtitle { color: #555; margin-bottom: 20px; }
-    .search-wrap { display: flex; justify-content: center; }
-    .search { width: 100%; max-width: 700px; display: flex; background: #fff; border-radius: 50px; padding: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-    .search input { flex: 1; border: none; padding: 12px 16px; font-size: 16px; border-radius: 50px; outline: none; }
-    .search button { background: linear-gradient(135deg, #2c7be5, #6c5ce7); border: none; color: #fff; font-weight: 600; border-radius: 50px; padding: 12px 20px; cursor: pointer; }
-    .box { background: #fff; border-radius: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.1); padding: 20px; margin-top: 20px; }
-    .box h2 { font-size: 20px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
-    .info-row { margin: 8px 0; }
-    .label { font-weight: 600; color: #444; }
-    .value { margin-left: 6px; color: #222; }
-    a.mail-link { color: #2c7be5; text-decoration: none; font-weight: 600; }
-    a.mail-link:hover { text-decoration: underline; }
+body { font-family: 'Inter', sans-serif; background: #f3f4f6; margin:0; padding:20px; display:flex; justify-content:center; }
+.container { width: min(900px,100%); }
+.hero { text-align:center; margin-bottom:20px; }
+.title { font-size:32px; font-weight:700; margin-bottom:10px; }
+.subtitle { color:#555; margin-bottom:20px; }
+.search-wrap { display:flex; justify-content:center; }
+.search { width:100%; max-width:700px; display:flex; background:#fff; border-radius:50px; padding:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+.search input { flex:1; border:none; padding:12px 16px; font-size:16px; border-radius:50px; outline:none; }
+.search button { background:linear-gradient(135deg, #2c7be5, #6c5ce7); border:none; color:#fff; font-weight:600; border-radius:50px; padding:12px 20px; cursor:pointer; }
+.box { background:#fff; border-radius:14px; box-shadow:0 8px 20px rgba(0,0,0,0.1); padding:20px; margin-top:20px; }
+.box h2 { font-size:20px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:5px; }
+.info-row { margin:8px 0; }
+.label { font-weight:600; color:#444; }
+.value { margin-left:6px; color:#222; }
+a.mail-link { color:#2c7be5; text-decoration:none; font-weight:600; }
+a.mail-link:hover { text-decoration:underline; }
+.journey-table { width:100%; border-collapse:collapse; margin-top:10px; }
+.journey-table th, .journey-table td { border:1px solid #ccc; padding:6px 10px; text-align:left; }
+.journey-table th { background:#f0f0f0; }
+button.templateBtn { padding:10px 20px; margin:5px; cursor:pointer; border:none; border-radius:8px; background:#2c7be5; color:white; font-weight:600; }
+#mailModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; backdrop-filter:blur(5px); background:rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:9999; }
+#mailContent { background:#fff; padding:20px; border-radius:10px; max-width:400px; width:90%; text-align:center; }
+#closeModal { cursor:pointer; margin-top:10px; padding:6px 12px; background:#e74c3c; color:#fff; border:none; border-radius:6px; }
 </style>
 </head>
 <body>
 <div class="container">
-    <div class="hero">
-        <h1 class="title">School Info Explorer</h1>
-        <p class="subtitle">Enter Affiliation Number to fetch school details</p>
-        <form class="search-wrap" method="post">
-            <div class="search">
-                <input name="aff_no" placeholder="Enter Affiliation Number" required value="{{ aff_no or '' }}" />
-                <button type="submit">Search</button>
-            </div>
-        </form>
-        {% if error %}
-        <p style="color: red; margin-top:10px;"><strong>Error:</strong> {{ error }}</p>
-        {% endif %}
-    </div>
-
-    {% if data %}
-    <div class="box">
-        <h2>School Details</h2>
-        <div class="info-row"><span class="label">School Name:</span> <span class="value">{{ data.school_name }}</span></div>
-        <div class="info-row"><span class="label">Principal:</span> <span class="value">{{ data.principal_name }}</span></div>
-        <div class="info-row"><span class="label">Principal Contact:</span> <span class="value">{{ data.principal_number }}</span></div>
-        <div class="info-row"><span class="label">Principal Email:</span> <a class="mail-link" href="mailto:{{ data.principal_email }}">{{ data.principal_email }}</a></div>
-        <div class="info-row"><span class="label">School Email:</span> <a class="mail-link" href="mailto:{{ data.school_email }}">{{ data.school_email }}</a></div>
-        <div class="info-row"><span class="label">Total Strength:</span> <span class="value">{{ data.total_strength }}</span></div>
-        <div class="info-row"><span class="label">Fee Structure (Yearly):</span> <span class="value">{{ data.fee_structure }}</span></div>
-    </div>
-
-    <div class="box">
-        <h2>Other Information</h2>
-        <div class="info-row"><span class="label">Address:</span> <span class="value">{{ data.address }}</span></div>
-        <div class="info-row"><span class="label">Website:</span> <a href="{{ data.website }}" target="_blank">{{ data.website }}</a></div>
-        <div class="info-row"><span class="label">SARAS Link:</span> <a href="{{ data.saras_link }}" target="_blank">{{ data.saras_link }}</a></div>
-        <div class="info-row"><span class="label">Lead Status:</span> <span class="value">{{ data.lead_status }}</span></div>
-        {% if data.school_id %}
-        <div class="info-row"><span class="label">School ID:</span> <span class="value">{{ data.school_id }}</span></div>
-        {% endif %}
-
-        {% if data.rounds %}
-        <div class="info-row"><span class="label">Rounds:</span></div>
-        <ul>
-            {% for r in data.rounds %}
-                <li>{{ r }}</li>
-            {% endfor %}
-        </ul>
-        <div class="info-row"><span class="label">Lead Owner:</span> <span class="value">{{ data.lead_owner }}</span></div>
-        {% endif %}
-
-        <div class="info-row">
-            <a class="mail-link" target="_blank"
-               href="https://mail.google.com/mail/?view=cm&fs=1&to={{ data.principal_email }},{{ data.school_email }}">
-               📧 Send Email
-            </a>
-        </div>
-    </div>
-    {% endif %}
+<div class="hero">
+<h1 class="title">School Info Explorer</h1>
+<p class="subtitle">Enter Affiliation Number to fetch school details</p>
+<form class="search-wrap" method="post">
+<div class="search">
+<input name="aff_no" placeholder="Enter Affiliation Number" required value="{{ aff_no or '' }}" />
+<button type="submit">Search</button>
 </div>
+</form>
+{% if error %}
+<p style="color:red; margin-top:10px;"><strong>Error:</strong> {{ error }}</p>
+{% endif %}
+</div>
+
+{% if data %}
+<div class="box">
+<h2>School Details</h2>
+<div class="info-row"><span class="label">School Name:</span> <span class="value">{{ data.school_name }}</span></div>
+<div class="info-row"><span class="label">Principal:</span> <span class="value">{{ data.principal_name }}</span></div>
+<div class="info-row"><span class="label">Principal Contact:</span> <span class="value">{{ data.principal_number }}</span></div>
+<div class="info-row"><span class="label">Principal Email:</span> <a class="mail-link" href="mailto:{{ data.principal_email }}">{{ data.principal_email }}</a></div>
+<div class="info-row"><span class="label">School Email:</span> <a class="mail-link" href="mailto:{{ data.school_email }}">{{ data.school_email }}</a></div>
+<div class="info-row"><span class="label">Total Strength:</span> <span class="value">{{ data.total_strength }}</span></div>
+<div class="info-row"><span class="label">Fee Structure (Yearly):</span> <span class="value">{{ data.fee_structure }}</span></div>
+
+<div class="info-row">
+<button id="sendMailBtn" class="mail-link" style="cursor:pointer;">📧 Send Email</button>
+</div>
+</div>
+
+<div class="box">
+<h2>Other Information</h2>
+<div class="info-row"><span class="label">Address:</span> <span class="value">{{ data.address }}</span></div>
+<div class="info-row"><span class="label">Website:</span> <a href="{{ data.website }}" target="_blank">{{ data.website }}</a></div>
+{% if data.school_code %}
+<div class="info-row"><span class="label">School Code:</span> <span class="value">{{ data.school_code }}</span></div>
+<div class="info-row"><span class="label">Lead Owner:</span> <span class="value">{{ data.lead_owner }}</span></div>
+{% endif %}
+
+{% if data.journey %}
+<h3>Journey:</h3>
+<table class="journey-table">
+<tr>
+<th>Round</th><th>Prelims Date</th><th>Registration</th><th>Participation</th><th>Rep</th>
+</tr>
+{% for r in data.journey %}
+<tr>
+<td>{{ r['Type of Round'] }}</td>
+<td>{{ r['Prelims Date'] }}</td>
+<td>{{ r['Reg'] }}</td>
+<td>{{ r['Part'] }}</td>
+<td>{{ r['Rep'] }}</td>
+</tr>
+{% endfor %}
+</table>
+{% endif %}
+
+</div>
+{% endif %}
+
+<!-- Mail Modal -->
+<div id="mailModal">
+    <div id="mailContent">
+        <h3>Select Mail Template</h3>
+        <button class="templateBtn" data-template="MATH">MATH</button>
+        <button class="templateBtn" data-template="HOTS">HOTS</button>
+        <button class="templateBtn" data-template="SCORE">SCORE</button>
+        <br>
+        <button id="closeModal">Cancel</button>
+    </div>
+</div>
+
+<script>
+const sendMailBtn = document.getElementById('sendMailBtn');
+const mailModal = document.getElementById('mailModal');
+const closeModal = document.getElementById('closeModal');
+sendMailBtn?.addEventListener('click', ()=> { mailModal.style.display='flex'; });
+closeModal?.addEventListener('click', ()=> { mailModal.style.display='none'; });
+
+document.querySelectorAll('.templateBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+        const template = btn.dataset.template;
+        let subject='', body='';
+        const principal = "{{ data.principal_name }}".toLowerCase().replace(/\b\w/g, l=>l.toUpperCase());
+        const school = "{{ data.school_name }}".toLowerCase().replace(/\b\w/g, l=>l.toUpperCase());
+        if(template==='MATH'){
+            subject = "Invitation to Participate in MATH Test: Empowering Students through Assessment Excellence";
+            body = `Dear ${principal},\n\nWe are delighted to invite ${school} to participate in the MATH Test.\n\nMode Of Exam:\n- Online\n\nMotive:\nThis free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nParticipation Benefits:\n- Certificates: All participants will receive a participation certificate.\n- Scholarships: Outstanding performers may qualify for scholarships from Infinity Learn.\n\nOnline Process:\n1. Registration: Fill out the Google form.\n2. Join WhatsApp Group.\n3. Exam credentials sent later.\n\nThanks & Regards,\nName\nDesignation\n{user_email}`;
+        }
+        else if(template==='HOTS'){
+            subject = "Invitation to Participate in HOTS Test";
+            body = `Dear ${principal},\n\nWe are delighted to invite ${school} to participate in the HOTS Test.\n\nMode Of Exam:\n- Online\n\nMotive:\nThis free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nParticipation Benefits:\n- Certificates and possible scholarships.\n\nOnline Process:\n1. Registration: Fill out the Google form.\n2. Join WhatsApp Group.\n3. Exam credentials sent later.\n\nThanks & Regards,\nName\nDesignation\n{user_email}`;
+        }
+        else if(template==='SCORE'){
+            subject = "Invitation to Participate in SCORE Test: Empowering Students through Assessment Excellence";
+            body = `Dear ${principal},\n\nWe are delighted to invite ${school} to participate in the SCORE Test.\n\nMotive:\nThis free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nParticipation Benefits:\n- Certificates and possible scholarships.\n\nMode Of Exam:\n- Online\n\nOnline Process:\n1. Registration.\n2. Join WhatsApp Group.\n3. Exam credentials sent later.\n\nThanks & Regards,\nName\nDesignation\n{user_email}`;
+        }
+        const mailto = `https://mail.google.com/mail/?view=cm&fs=1&to={{ data.principal_email }},{{ data.school_email }}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.open(mailto,'_blank');
+        mailModal.style.display='none';
+    });
+});
+</script>
 </body>
 </html>
 """
@@ -125,21 +178,15 @@ def fetch_from_cbse(aff_no):
         resp = requests.get(url, timeout=10)
         if resp.status_code != 200:
             return None
-        from bs4 import BeautifulSoup
         soup = BeautifulSoup(resp.text, "html.parser")
-
         def get_val(_id):
             el = soup.find(id=_id)
             return el.get_text(strip=True) if el else "Not Found"
-
-        # Student strength
         total_strength = 0
         for i in range(1, 13):
             val = get_val(f"lblstu{i}")
             if val.isdigit():
                 total_strength += int(val)
-
-        # Fee structure
         adm = int(get_val("lblsecadm") or 0) if get_val("lblsecadm").isdigit() else 0
         dev = int(get_val("lblsecdev") or 0) if get_val("lblsecdev").isdigit() else 0
         oth = int(get_val("lblsecoth") or 0) if get_val("lblsecoth").isdigit() else 0
@@ -148,7 +195,6 @@ def fetch_from_cbse(aff_no):
         if 0 < tui < 10000:
             tui *= 12
         fee_total = adm + dev + oth + tui
-
         return {
             "school_name": get_val("lblsch_name"),
             "aff_no": aff_no,
@@ -216,35 +262,39 @@ def index():
             else:
                 save_to_csv(data)
 
-            # Check matched_schools
-            if data:
-                row = matched_df.loc[matched_df["Aff No"] == aff_no]
-                if not row.empty:
-                    person = row.iloc[0].get("Person", "Assigned")
-                    school_id = row.iloc[0].get("SCHOOL_ID", "Code unavailable")
-                    data["lead_status"] = f"Existing Lead — with {person}"
-                    data["school_id"] = school_id
+            # Existing lead check
+            row = matched_df.loc[matched_df["Aff No"] == aff_no]
+            if not row.empty:
+                person = row.iloc[0].get("Person", "Assigned")
+                school_code = row.iloc[0].get("SCHOOL_ID", "")
+                data["lead_status"] = f"Existing Lead — with {person}"
+                data["school_code"] = school_code
 
-                    # Fetch v2_data rounds info
-                    rounds_df = v2_df.loc[v2_df["School Code"] == school_id]
+                # Fetch Journey data
+                rounds_df = v2_df.loc[v2_df["SCHOOL_ID"] == school_code]
+                if not rounds_df.empty:
+                    rounds_df = rounds_df.drop_duplicates(subset=["Type of Round","Prelims Date","Reg","Part","Rep"])
+                    rounds_df = rounds_df[~rounds_df["Rep"].str.lower().isin(["canceled","duplicate"])]
+
+                    for col in ["Prelims Date","Reg","Part"]:
+                        if col in rounds_df.columns:
+                            rounds_df[col] = rounds_df[col].replace("", "Not Found").fillna("Not Found")
+                        else:
+                            rounds_df[col] = "Not Found"
+
                     rounds_list = []
-                    lead_owner = ""
-                    if not rounds_df.empty:
-                        rounds_df = rounds_df.sort_values(by="Type of Round")  # sort by round type
-                        for idx, r in rounds_df.iterrows():
-                            rounds_list.append(
-                                f"round {r['Type of Round']} - {r['Prelims Date']} - {r['Registration']} - {r['Participation']} - {r['Rep']}"
-                            )
-                        lead_owner = rounds_df.iloc[-1]['Rep']
-                    data["rounds"] = rounds_list
-                    data["lead_owner"] = lead_owner
-                else:
-                    data["lead_status"] = "Unique Lead"
-                    data["school_id"] = None
-                    data["rounds"] = None
-                    data["lead_owner"] = None
+                    for idx, r in rounds_df.iterrows():
+                        rounds_list.append({
+                            "Type of Round": r["Type of Round"],
+                            "Prelims Date": r["Prelims Date"],
+                            "Reg": r["Reg"],
+                            "Part": r["Part"],
+                            "Rep": r["Rep"]
+                        })
+                    data["journey"] = rounds_list
+                    data["lead_owner"] = rounds_df.iloc[-1]["Rep"]
 
     return render_template_string(HTML_PAGE, data=data, error=error, aff_no=aff_no)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(debug=True, host="0.0.0.0", port=5000)
