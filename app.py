@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import os
 from bs4 import BeautifulSoup
-import urllib.parse
 
 app = Flask(__name__)
 
@@ -47,6 +46,7 @@ body { font-family: 'Inter', sans-serif; background: #f3f4f6; margin:0; padding:
 .search { width:100%; max-width:700px; display:flex; background:#fff; border-radius:50px; padding:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
 .search input { flex:1; border:none; padding:12px 16px; font-size:16px; border-radius:50px; outline:none; }
 .search button { background:linear-gradient(135deg, #2c7be5, #6c5ce7); border:none; color:#fff; font-weight:600; border-radius:50px; padding:12px 20px; cursor:pointer; }
+
 .box { background:#fff; border-radius:14px; box-shadow:0 8px 20px rgba(0,0,0,0.1); padding:20px; margin-top:20px; }
 .box h2 { font-size:20px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:5px; }
 .info-row { margin:8px 0; }
@@ -57,10 +57,15 @@ a.mail-link:hover { text-decoration:underline; }
 .journey-table { width:100%; border-collapse:collapse; margin-top:10px; }
 .journey-table th, .journey-table td { border:1px solid #ccc; padding:6px 10px; text-align:left; }
 .journey-table th { background:#f0f0f0; }
-button.templateBtn { padding:10px 20px; margin:5px; cursor:pointer; border:none; border-radius:8px; background:#2c7be5; color:white; font-weight:600; }
-#mailModal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; backdrop-filter:blur(5px); background:rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:9999; }
-#mailContent { background:#fff; padding:20px; border-radius:10px; max-width:400px; width:90%; text-align:center; }
-#closeModal { cursor:pointer; margin-top:10px; padding:6px 12px; background:#e74c3c; color:#fff; border:none; border-radius:6px; }
+
+/* Popup styles */
+.popup-bg { display:none; position:fixed; top:0; left:0; width:100%; height:100%; backdrop-filter: blur(6px); background: rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:1000; }
+.popup { background:#fff; padding:20px; border-radius:12px; max-width:400px; width:90%; text-align:center; }
+.popup button { margin:10px; padding:10px 20px; font-size:16px; cursor:pointer; border:none; border-radius:6px; color:#fff; }
+.math-btn { background:#2c7be5; }
+.hots-btn { background:#f39c12; }
+.score-btn { background:#6c5ce7; }
+.close-btn { margin-top:15px; background:#888; }
 </style>
 </head>
 <body>
@@ -70,7 +75,7 @@ button.templateBtn { padding:10px 20px; margin:5px; cursor:pointer; border:none;
 <p class="subtitle">Enter Affiliation Number to fetch school details</p>
 <form class="search-wrap" method="post">
 <div class="search">
-<input name="aff_no" placeholder="Enter Affiliation Number" required value="{{ aff_no or '' }}" />
+<input name="aff_no" placeholder="Enter Affiliation Number" required value="" />
 <button type="submit">Search</button>
 </div>
 </form>
@@ -89,9 +94,8 @@ button.templateBtn { padding:10px 20px; margin:5px; cursor:pointer; border:none;
 <div class="info-row"><span class="label">School Email:</span> <a class="mail-link" href="mailto:{{ data.school_email }}">{{ data.school_email }}</a></div>
 <div class="info-row"><span class="label">Total Strength:</span> <span class="value">{{ data.total_strength }}</span></div>
 <div class="info-row"><span class="label">Fee Structure (Yearly):</span> <span class="value">{{ data.fee_structure }}</span></div>
-
 <div class="info-row">
-<button id="sendMailBtn" class="mail-link" style="cursor:pointer;">📧 Send Email</button>
+<button onclick="openMailPopup('{{ data.principal_email }}','{{ data.school_email }}','{{ data.school_name }}','{{ data.principal_name }}'); return false;">📧 Send Email</button>
 </div>
 </div>
 
@@ -124,49 +128,52 @@ button.templateBtn { padding:10px 20px; margin:5px; cursor:pointer; border:none;
 
 </div>
 {% endif %}
+</div>
 
-<!-- Mail Modal -->
-<div id="mailModal">
-    <div id="mailContent">
-        <h3>Select Mail Template</h3>
-        <button class="templateBtn" data-template="MATH">MATH</button>
-        <button class="templateBtn" data-template="HOTS">HOTS</button>
-        <button class="templateBtn" data-template="SCORE">SCORE</button>
-        <br>
-        <button id="closeModal">Cancel</button>
-    </div>
+<!-- Mail template popup -->
+<div class="popup-bg" id="mailPopup">
+<div class="popup">
+<h3>Select Mail Template</h3>
+<button class="math-btn" onclick="sendMail('math')">MATH</button>
+<button class="hots-btn" onclick="sendMail('hots')">HOTS</button>
+<button class="score-btn" onclick="sendMail('score')">SCORE</button>
+<br>
+<button class="close-btn" onclick="closePopup()">Cancel</button>
+</div>
 </div>
 
 <script>
-const sendMailBtn = document.getElementById('sendMailBtn');
-const mailModal = document.getElementById('mailModal');
-const closeModal = document.getElementById('closeModal');
-sendMailBtn?.addEventListener('click', ()=> { mailModal.style.display='flex'; });
-closeModal?.addEventListener('click', ()=> { mailModal.style.display='none'; });
+let currentMail = {};
+function openMailPopup(principalEmail, schoolEmail, schoolName, principalName){
+    currentMail = {principalEmail, schoolEmail, schoolName, principalName};
+    document.getElementById('mailPopup').style.display='flex';
+}
+function closePopup(){ document.getElementById('mailPopup').style.display='none'; }
 
-document.querySelectorAll('.templateBtn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-        const template = btn.dataset.template;
-        let subject='', body='';
-        const principal = "{{ data.principal_name }}".toLowerCase().replace(/\b\w/g, l=>l.toUpperCase());
-        const school = "{{ data.school_name }}".toLowerCase().replace(/\b\w/g, l=>l.toUpperCase());
-        if(template==='MATH'){
-            subject = "Invitation to Participate in MATH Test: Empowering Students through Assessment Excellence";
-            body = `Dear ${principal},\n\nWe are delighted to invite ${school} to participate in the MATH Test.\n\nMode Of Exam:\n- Online\n\nMotive:\nThis free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nParticipation Benefits:\n- Certificates: All participants will receive a participation certificate.\n- Scholarships: Outstanding performers may qualify for scholarships from Infinity Learn.\n\nOnline Process:\n1. Registration: Fill out the Google form.\n2. Join WhatsApp Group.\n3. Exam credentials sent later.\n\nThanks & Regards,\nName\nDesignation\n{user_email}`;
-        }
-        else if(template==='HOTS'){
-            subject = "Invitation to Participate in HOTS Test";
-            body = `Dear ${principal},\n\nWe are delighted to invite ${school} to participate in the HOTS Test.\n\nMode Of Exam:\n- Online\n\nMotive:\nThis free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nParticipation Benefits:\n- Certificates and possible scholarships.\n\nOnline Process:\n1. Registration: Fill out the Google form.\n2. Join WhatsApp Group.\n3. Exam credentials sent later.\n\nThanks & Regards,\nName\nDesignation\n{user_email}`;
-        }
-        else if(template==='SCORE'){
-            subject = "Invitation to Participate in SCORE Test: Empowering Students through Assessment Excellence";
-            body = `Dear ${principal},\n\nWe are delighted to invite ${school} to participate in the SCORE Test.\n\nMotive:\nThis free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nParticipation Benefits:\n- Certificates and possible scholarships.\n\nMode Of Exam:\n- Online\n\nOnline Process:\n1. Registration.\n2. Join WhatsApp Group.\n3. Exam credentials sent later.\n\nThanks & Regards,\nName\nDesignation\n{user_email}`;
-        }
-        const mailto = `https://mail.google.com/mail/?view=cm&fs=1&to={{ data.principal_email }},{{ data.school_email }}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-        window.open(mailto,'_blank');
-        mailModal.style.display='none';
-    });
-});
+function capitalizeFirstLetter(str){
+    return str.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function sendMail(template){
+    let subj="", body="";
+    let schoolName = capitalizeFirstLetter(currentMail.schoolName);
+    let principalName = capitalizeFirstLetter(currentMail.principalName);
+
+    if(template==="math"){
+        subj="Invitation to Participate in MATH Test: Empowering Students through Assessment Excellence";
+        body=`Dear ${principalName},\n\nWe are delighted to invite ${schoolName} to participate in the MATH Test.\nMode Of Exam: Online\n\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nThanks & Regards,\nName\nDesignation\n{user's mail id}`;
+    } else if(template==="hots"){
+        subj="Invitation to Participate in HOTS Test";
+        body=`Dear ${principalName},\n\nWe are delighted to invite ${schoolName} to participate in the HOTS Test.\nMode Of Exam: Online\n\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nThanks & Regards,\nName\nDesignation\n{user's mail id}`;
+    } else if(template==="score"){
+        subj="Invitation to Participate in SCORE Test: Empowering Students through Assessment Excellence";
+        body=`Dear ${principalName},\n\nWe are delighted to invite ${schoolName} to participate in the SCORE Test.\nMode Of Exam: Online\n\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nThanks & Regards,\nName\nDesignation\n{user's mail id}`;
+    }
+
+    let mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${currentMail.principalEmail},${currentMail.schoolEmail}&su=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+    window.open(mailtoLink,'_blank');
+    closePopup();
+}
 </script>
 </body>
 </html>
@@ -179,14 +186,17 @@ def fetch_from_cbse(aff_no):
         if resp.status_code != 200:
             return None
         soup = BeautifulSoup(resp.text, "html.parser")
+
         def get_val(_id):
             el = soup.find(id=_id)
             return el.get_text(strip=True) if el else "Not Found"
+
         total_strength = 0
         for i in range(1, 13):
             val = get_val(f"lblstu{i}")
             if val.isdigit():
                 total_strength += int(val)
+
         adm = int(get_val("lblsecadm") or 0) if get_val("lblsecadm").isdigit() else 0
         dev = int(get_val("lblsecdev") or 0) if get_val("lblsecdev").isdigit() else 0
         oth = int(get_val("lblsecoth") or 0) if get_val("lblsecoth").isdigit() else 0
@@ -195,6 +205,7 @@ def fetch_from_cbse(aff_no):
         if 0 < tui < 10000:
             tui *= 12
         fee_total = adm + dev + oth + tui
+
         return {
             "school_name": get_val("lblsch_name"),
             "aff_no": aff_no,
@@ -214,7 +225,9 @@ def fetch_from_cbse(aff_no):
 
 def save_to_csv(data):
     global school_df
-    if data["aff_no"] not in school_df["Aff No"].astype(str).values:
+    # Normalize values for uniqueness
+    aff_no_val = str(data["aff_no"]).strip()
+    if not (school_df["Aff No"].astype(str).str.strip() == aff_no_val).any():
         new_row = pd.DataFrame([{
             "School Name": data["school_name"],
             "Aff No": data["aff_no"],
@@ -230,19 +243,45 @@ def save_to_csv(data):
         new_row.to_csv(CSV_FILE, mode="a", header=False, index=False)
         school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 
-@app.route("/", methods=["GET", "POST"])
+def get_school_data(aff_no):
+    global school_df
+    aff_no = str(aff_no).strip()
+    
+    # Check if it already exists
+    row = school_df.loc[school_df["Aff No"].astype(str).str.strip() == aff_no]
+    if not row.empty:
+        # Already exists, return existing data
+        row = row.iloc[0]
+        return {
+            "school_name": row["School Name"],
+            "principal_name": row["Principal Name"],
+            "principal_number": row["Principal Number"],
+            "principal_email": row["Principal Email"],
+            "school_email": row["School Email"],
+            "address": row["Address"],
+            "website": row["Website"],
+            "fee_structure": row["Fee Structure"],
+            "total_strength": row["Total Strength"],
+        }
+    
+    # Else fetch from Saras
+    data = fetch_from_cbse(aff_no)
+    if data:
+        save_to_csv(data)
+    return data
+
+@app.route("/", methods=["GET","POST"])
 def index():
     global school_df, matched_df, v2_df
-    data, error, aff_no = None, None, None
-
-    if request.method == "POST":
-        aff_no = request.form.get("aff_no", "").strip()
+    data, error = None, None
+    if request.method=="POST":
+        aff_no = request.form.get("aff_no","").strip()
         if not aff_no:
             error = "Please enter a valid Affiliation Number."
         else:
             data = fetch_from_cbse(aff_no)
             if not data:
-                row = school_df.loc[school_df["Aff No"] == aff_no]
+                row = school_df.loc[school_df["Aff No"]==aff_no]
                 if row.empty:
                     error = "No information found for this Affiliation Number."
                 else:
@@ -263,27 +302,25 @@ def index():
                 save_to_csv(data)
 
             # Existing lead check
-            row = matched_df.loc[matched_df["Aff No"] == aff_no]
+            row = matched_df.loc[matched_df["Aff No"]==aff_no]
             if not row.empty:
-                person = row.iloc[0].get("Person", "Assigned")
-                school_code = row.iloc[0].get("SCHOOL_ID", "")
+                person = row.iloc[0].get("Person","Assigned")
+                school_code = row.iloc[0].get("SCHOOL_ID","")
                 data["lead_status"] = f"Existing Lead — with {person}"
                 data["school_code"] = school_code
 
-                # Fetch Journey data
-                rounds_df = v2_df.loc[v2_df["SCHOOL_ID"] == school_code]
+                # Journey data
+                rounds_df = v2_df.loc[v2_df["SCHOOL_ID"]==school_code]
                 if not rounds_df.empty:
                     rounds_df = rounds_df.drop_duplicates(subset=["Type of Round","Prelims Date","Reg","Part","Rep"])
                     rounds_df = rounds_df[~rounds_df["Rep"].str.lower().isin(["canceled","duplicate"])]
-
                     for col in ["Prelims Date","Reg","Part"]:
                         if col in rounds_df.columns:
                             rounds_df[col] = rounds_df[col].replace("", "Not Found").fillna("Not Found")
                         else:
                             rounds_df[col] = "Not Found"
-
-                    rounds_list = []
-                    for idx, r in rounds_df.iterrows():
+                    rounds_list=[]
+                    for idx,r in rounds_df.iterrows():
                         rounds_list.append({
                             "Type of Round": r["Type of Round"],
                             "Prelims Date": r["Prelims Date"],
@@ -294,7 +331,8 @@ def index():
                     data["journey"] = rounds_list
                     data["lead_owner"] = rounds_df.iloc[-1]["Rep"]
 
-    return render_template_string(HTML_PAGE, data=data, error=error, aff_no=aff_no)
+    return render_template_string(HTML_PAGE, data=data, error=error)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
+
