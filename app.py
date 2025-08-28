@@ -3,31 +3,203 @@ import pandas as pd
 import requests
 import os
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+# CSV Files
 CSV_FILE = "schools.csv"
 MATCHED_FILE = "matched_schools.csv"
 V2_FILE = "v2_data.csv"
 
+# Required Columns
 REQUIRED_COLS = [
     "School Name", "Aff No", "Principal Name", "Principal Number",
     "Principal Email", "School Email", "Address", "Website",
     "Fee Structure", "Total Strength"
 ]
 
+# Ensure files exist
 if not os.path.exists(CSV_FILE):
     pd.DataFrame(columns=REQUIRED_COLS).to_csv(CSV_FILE, index=False)
 if not os.path.exists(MATCHED_FILE):
     pd.DataFrame(columns=["Aff No", "Person", "SCHOOL_ID"]).to_csv(MATCHED_FILE, index=False)
 if not os.path.exists(V2_FILE):
-    pd.DataFrame(columns=["SCHOOL_ID","Type of Round","Prelims Date","Reg","Part","Rep"]).to_csv(V2_FILE, index=False)
+    pd.DataFrame(columns=["SCHOOL_ID", "Type of Round", "Prelims Date", "Reg", "Part", "Rep"]).to_csv(V2_FILE, index=False)
 
 # Load CSVs
 school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 matched_df = pd.read_csv(MATCHED_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
 v2_df = pd.read_csv(V2_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 
+
+# -------------------- Fetching from CBSE --------------------
+def fetch_from_cbse(aff_no):
+    """Fetch school info from CBSE Saras Portal"""
+    try:
+        url = f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
+        resp = requests.get(url, timeout=10)
+        if resp.status_code != 200:
+            return None
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        def get_val(_id):
+            el = soup.find(id=_id)
+            return el.get_text(strip=True) if el else "Not Found"
+
+        # Student strength
+        total_strength = 0
+        for i in range(1, 13):
+            val = get_val(f"lblstu{i}")
+            if val.isdigit():
+                total_strength += int(val)
+
+        # Fee Structure
+        adm = int(get_val("lblsecadm") or 0) if get_val("lblsecadm").isdigit() else 0
+        dev = int(get_val("lblsecdev") or 0) if get_val("lblsecdev").isdigit() else 0
+        oth = int(get_val("lblsecoth") or 0) if get_val("lblsecoth").isdigit() else 0
+        tui = get_val("lblsectui")
+        tui = int(tui) if tui.isdigit() else 0
+        if 0 < tui < 10000:
+            tui *= 12
+        fee_total = adm + dev + oth + tui
+
+        return {
+            "school_name": get_val("lblsch_name"),
+            "aff_no": aff_no,
+            "principal_name": get_val("lblprinci"),
+            "principal_number": get_val("lblprincicon"),
+            "principal_email": get_val("lblprinciemail"),
+            "school_email": get_val("lblschemail"),
+            "address": get_val("lbladd"),
+            "website": get_val("lblschweb"),
+            "fee_structure": str(fee_total),
+            "total_strength": str(total_strength),
+            "saras_link": url,
+        }
+    except Exception as e:
+        print("Error fetching CBSE:", e)
+        return None
+
+
+# -------------------- Save to CSV --------------------
+def save_to_csv(data):
+    """Save new school data to schools.csv if not already present"""
+    global school_df
+    aff_no_val = str(data["aff_no"]).strip()
+    if not (school_df["Aff No"].astype(str).str.strip() == aff_no_val).any():
+        new_row = pd.DataFrame([{
+            "School Name": data["school_name"],
+            "Aff No": data["aff_no"],
+            "Principal Name": data["principal_name"],
+            "Principal Number": data["principal_number"],
+            "Principal Email": data["principal_email"],
+            "School Email": data["school_email"],
+            "Address": data["address"],
+            "Website": data["website"],
+            "Fee Structure": data["fee_structure"],
+            "Total Strength": data["total_strength"],
+        }])
+        new_row.to_csv(CSV_FILE, mode="a", header=False, index=False)
+        school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
+
+
+# -------------------- Flask Route --------------------
+@app.route("/", methods=["GET", "POST"])
+def index():
+    global school_df, matched_df, v2_df
+    data, error = None, None
+
+    if request.method == "POST":
+        aff_no = request.form.get("aff_no", "").strip()
+
+        if not aff_no:
+            error = "Please enter a valid Affiliation Number."
+        else:
+            # Fetch from Saras
+            data = fetch_from_cbse(aff_no)
+
+            if not data:
+                # If not found, check local CSV
+                row = school_df.loc[school_df["Aff No"] == aff_no]
+                if row.empty:
+                    error = "No information found for this Affiliation Number."
+                else:
+                    row = row.iloc[0]
+                    data = {
+                        "school_name": row["School Name"],
+                        "principal_name": row["Principal Name"],
+                        "principal_number": row["Principal Number"],
+                        "principal_email": row["Principal Email"],
+                        "school_email": row["School Email"],
+                        "address": row["Address"],
+                        "website": row["Website"],
+                        "fee_structure": row["Fee Structure"],
+                        "total_strength": row["Total Strength"],
+                        "saras_link": f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
+                    }
+            else:
+                save_to_csv(data)
+
+            # -------------------- Existing Lead + Journey --------------------
+            row = matched_df.loc[matched_df["Aff No"] == aff_no]
+            if not row.empty:
+                person = row.iloc[0].get("Person", "Assigned")
+                school_code = row.iloc[0].get("SCHOOL_ID", "")
+                data["lead_status"] = f"Existing Lead — with {person}"
+                data["school_code"] = school_code
+
+                # Journey Data
+                rounds_df = v2_df.loc[v2_df["SCHOOL_ID"] == school_code]
+                if not rounds_df.empty:
+                    rounds_df = rounds_df.drop_duplicates(
+                        subset=["Type of Round", "Prelims Date", "Reg", "Part", "Rep"]
+                    )
+                    rounds_df = rounds_df[~rounds_df["Rep"].str.lower().isin(["canceled", "duplicate"])]
+
+                    for col in ["Prelims Date", "Reg", "Part"]:
+                        if col in rounds_df.columns:
+                            rounds_df[col] = rounds_df[col].replace("", "Not Found").fillna("Not Found")
+                        else:
+                            rounds_df[col] = "Not Found"
+
+                    rounds_list = []
+                    for _, r in rounds_df.iterrows():
+                        rounds_list.append({
+                            "Type of Round": r["Type of Round"],
+                            "Prelims Date": r["Prelims Date"],
+                            "Reg": r["Reg"],
+                            "Part": r["Part"],
+                            "Rep": r["Rep"]
+                        })
+                    data["journey"] = rounds_list
+                    data["lead_owner"] = rounds_df.iloc[-1]["Rep"]
+
+                    # ✅ Eligible After calculation
+                    prelims_dates = []
+                    for r in rounds_list:
+                        date_str = r.get("Prelims Date")
+                        if date_str not in ["", "Not Found"]:
+                            try:
+                                prelims_dates.append(datetime.strptime(date_str, "%d-%b-%Y"))
+                            except ValueError:
+                                # fallback if date comes in numeric format
+                                try:
+                                    prelims_dates.append(datetime.strptime(date_str, "%d-%m-%Y"))
+                                except ValueError:
+                                    pass
+
+                    if prelims_dates:
+                        latest_prelims = max(prelims_dates)
+                        data["eligible_after"] = (latest_prelims + timedelta(days=90)).strftime("%Y-%m-%d")
+                    else:
+                        data["eligible_after"] = "Not Available"
+
+    return render_template_string(HTML_PAGE, data=data, error=error)
+
+
+# -------------------- HTML Template --------------------
 HTML_PAGE = """ 
 <!DOCTYPE html>
 <html lang="en">
@@ -106,6 +278,7 @@ a.mail-link:hover { text-decoration:underline; }
 {% if data.school_code %}
 <div class="info-row"><span class="label">School Code:</span> <span class="value">{{ data.school_code }}</span></div>
 <div class="info-row"><span class="label">Lead Owner:</span> <span class="value">{{ data.lead_owner }}</span></div>
+<div class="info-row"><span class="label">Eligible After:</span> <span class="value">{{ data.eligible_after }}</span></div>
 {% endif %}
 
 {% if data.journey %}
@@ -151,7 +324,7 @@ function openMailPopup(principalEmail, schoolEmail, schoolName, principalName){
 function closePopup(){ document.getElementById('mailPopup').style.display='none'; }
 
 function capitalizeFirstLetter(str){
-    return str.replace(/\b\w/g, c => c.toUpperCase());
+    return str.replace(/\\b\\w/g, c => c.toUpperCase());
 }
 
 function sendMail(template){
@@ -161,13 +334,13 @@ function sendMail(template){
 
     if(template==="math"){
         subj="Invitation to Participate in MATH Test: Empowering Students through Assessment Excellence";
-        body=`Dear ${principalName},\n\nWe are delighted to invite ${schoolName} to participate in the MATH Test.\nMode Of Exam: Online\n\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nThanks & Regards,\nName\nDesignation\n{user's mail id}`;
+        body=`Dear ${principalName},\\n\\nWe are delighted to invite ${schoolName} to participate in the MATH Test.\\nMode Of Exam: Online\\n\\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\\n\\nThanks & Regards,\\nName\\nDesignation\\n{user's mail id}`;
     } else if(template==="hots"){
         subj="Invitation to Participate in HOTS Test";
-        body=`Dear ${principalName},\n\nWe are delighted to invite ${schoolName} to participate in the HOTS Test.\nMode Of Exam: Online\n\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nThanks & Regards,\nName\nDesignation\n{user's mail id}`;
+        body=`Dear ${principalName},\\n\\nWe are delighted to invite ${schoolName} to participate in the HOTS Test.\\nMode Of Exam: Online\\n\\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\\n\\nThanks & Regards,\\nName\\nDesignation\\n{user's mail id}`;
     } else if(template==="score"){
         subj="Invitation to Participate in SCORE Test: Empowering Students through Assessment Excellence";
-        body=`Dear ${principalName},\n\nWe are delighted to invite ${schoolName} to participate in the SCORE Test.\nMode Of Exam: Online\n\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\n\nThanks & Regards,\nName\nDesignation\n{user's mail id}`;
+        body=`Dear ${principalName},\\n\\nWe are delighted to invite ${schoolName} to participate in the SCORE Test.\\nMode Of Exam: Online\\n\\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\\n\\nThanks & Regards,\\nName\\nDesignation\\n{user's mail id}`;
     }
 
     let mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${currentMail.principalEmail},${currentMail.schoolEmail}&su=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
@@ -179,160 +352,6 @@ function sendMail(template){
 </html>
 """
 
-def fetch_from_cbse(aff_no):
-    try:
-        url = f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200:
-            return None
-        soup = BeautifulSoup(resp.text, "html.parser")
 
-        def get_val(_id):
-            el = soup.find(id=_id)
-            return el.get_text(strip=True) if el else "Not Found"
-
-        total_strength = 0
-        for i in range(1, 13):
-            val = get_val(f"lblstu{i}")
-            if val.isdigit():
-                total_strength += int(val)
-
-        adm = int(get_val("lblsecadm") or 0) if get_val("lblsecadm").isdigit() else 0
-        dev = int(get_val("lblsecdev") or 0) if get_val("lblsecdev").isdigit() else 0
-        oth = int(get_val("lblsecoth") or 0) if get_val("lblsecoth").isdigit() else 0
-        tui = get_val("lblsectui")
-        tui = int(tui) if tui.isdigit() else 0
-        if 0 < tui < 10000:
-            tui *= 12
-        fee_total = adm + dev + oth + tui
-
-        return {
-            "school_name": get_val("lblsch_name"),
-            "aff_no": aff_no,
-            "principal_name": get_val("lblprinci"),
-            "principal_number": get_val("lblprincicon"),
-            "principal_email": get_val("lblprinciemail"),
-            "school_email": get_val("lblschemail"),
-            "address": get_val("lbladd"),
-            "website": get_val("lblschweb"),
-            "fee_structure": str(fee_total),
-            "total_strength": str(total_strength),
-            "saras_link": url,
-        }
-    except Exception as e:
-        print("Error fetching CBSE:", e)
-        return None
-
-def save_to_csv(data):
-    global school_df
-    # Normalize values for uniqueness
-    aff_no_val = str(data["aff_no"]).strip()
-    if not (school_df["Aff No"].astype(str).str.strip() == aff_no_val).any():
-        new_row = pd.DataFrame([{
-            "School Name": data["school_name"],
-            "Aff No": data["aff_no"],
-            "Principal Name": data["principal_name"],
-            "Principal Number": data["principal_number"],
-            "Principal Email": data["principal_email"],
-            "School Email": data["school_email"],
-            "Address": data["address"],
-            "Website": data["website"],
-            "Fee Structure": data["fee_structure"],
-            "Total Strength": data["total_strength"],
-        }])
-        new_row.to_csv(CSV_FILE, mode="a", header=False, index=False)
-        school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
-
-def get_school_data(aff_no):
-    global school_df
-    aff_no = str(aff_no).strip()
-    
-    # Check if it already exists
-    row = school_df.loc[school_df["Aff No"].astype(str).str.strip() == aff_no]
-    if not row.empty:
-        # Already exists, return existing data
-        row = row.iloc[0]
-        return {
-            "school_name": row["School Name"],
-            "principal_name": row["Principal Name"],
-            "principal_number": row["Principal Number"],
-            "principal_email": row["Principal Email"],
-            "school_email": row["School Email"],
-            "address": row["Address"],
-            "website": row["Website"],
-            "fee_structure": row["Fee Structure"],
-            "total_strength": row["Total Strength"],
-        }
-    
-    # Else fetch from Saras
-    data = fetch_from_cbse(aff_no)
-    if data:
-        save_to_csv(data)
-    return data
-
-@app.route("/", methods=["GET","POST"])
-def index():
-    global school_df, matched_df, v2_df
-    data, error = None, None
-    if request.method=="POST":
-        aff_no = request.form.get("aff_no","").strip()
-        if not aff_no:
-            error = "Please enter a valid Affiliation Number."
-        else:
-            data = fetch_from_cbse(aff_no)
-            if not data:
-                row = school_df.loc[school_df["Aff No"]==aff_no]
-                if row.empty:
-                    error = "No information found for this Affiliation Number."
-                else:
-                    row = row.iloc[0]
-                    data = {
-                        "school_name": row["School Name"],
-                        "principal_name": row["Principal Name"],
-                        "principal_number": row["Principal Number"],
-                        "principal_email": row["Principal Email"],
-                        "school_email": row["School Email"],
-                        "address": row["Address"],
-                        "website": row["Website"],
-                        "fee_structure": row["Fee Structure"],
-                        "total_strength": row["Total Strength"],
-                        "saras_link": f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
-                    }
-            else:
-                save_to_csv(data)
-
-            # Existing lead check
-            row = matched_df.loc[matched_df["Aff No"]==aff_no]
-            if not row.empty:
-                person = row.iloc[0].get("Person","Assigned")
-                school_code = row.iloc[0].get("SCHOOL_ID","")
-                data["lead_status"] = f"Existing Lead — with {person}"
-                data["school_code"] = school_code
-
-                # Journey data
-                rounds_df = v2_df.loc[v2_df["SCHOOL_ID"]==school_code]
-                if not rounds_df.empty:
-                    rounds_df = rounds_df.drop_duplicates(subset=["Type of Round","Prelims Date","Reg","Part","Rep"])
-                    rounds_df = rounds_df[~rounds_df["Rep"].str.lower().isin(["canceled","duplicate"])]
-                    for col in ["Prelims Date","Reg","Part"]:
-                        if col in rounds_df.columns:
-                            rounds_df[col] = rounds_df[col].replace("", "Not Found").fillna("Not Found")
-                        else:
-                            rounds_df[col] = "Not Found"
-                    rounds_list=[]
-                    for idx,r in rounds_df.iterrows():
-                        rounds_list.append({
-                            "Type of Round": r["Type of Round"],
-                            "Prelims Date": r["Prelims Date"],
-                            "Reg": r["Reg"],
-                            "Part": r["Part"],
-                            "Rep": r["Rep"]
-                        })
-                    data["journey"] = rounds_list
-                    data["lead_owner"] = rounds_df.iloc[-1]["Rep"]
-
-    return render_template_string(HTML_PAGE, data=data, error=error)
-
-if __name__=="__main__":
+if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=5000)
-
