@@ -1,41 +1,99 @@
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template, request, jsonify, send_file
 import pandas as pd
-import requests
-import os
+from io import BytesIO
+import os, re
 from bs4 import BeautifulSoup
+import requests
 from datetime import datetime, timedelta
+import zipfile
+from fpdf import FPDF  # <-- Added import for FPDF
 
 app = Flask(__name__)
 
-# CSV Files
+# -------------------- Student Data Preparation --------------------
+def clean_name(name):
+    name = name.replace('.', ' ')
+    name = re.sub(r'[,\d/]', '', name)
+    name = re.sub(r'\s+', ' ', name).strip()
+    return name.title()
+
+@app.route("/api/prepare-data", methods=["POST"])
+def prepare_data():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    school_id = request.form.get("school_id", "").strip()
+    school_name = request.form.get("school_name", "").strip()
+    class_offset = int(request.form.get("class_offset", 0))
+
+    if not school_id or not school_name:
+        return jsonify({"error": "School ID and School Name are required"}), 400
+
+    try:
+        df = pd.read_excel(file)
+
+        name_col = "Name Of The Student"
+        class_col = "Class"
+        phone_col = "WhatsApp No (Provide your correct WhatsApp Number)\n(Login Id & password Will Be Shared On whatsapp Only)"
+
+        if not all(col in df.columns for col in [name_col, class_col, phone_col]):
+            return jsonify({"error": "Missing required columns"}), 400
+
+        def extract_grade(class_value):
+            match = re.search(r'\d+', str(class_value))
+            return int(match.group(0)) if match else 0
+
+        updated_grades = [extract_grade(c) + class_offset for c in df[class_col]]
+        cleaned_names = df[name_col].astype(str).apply(clean_name)
+
+        output_df = pd.DataFrame({
+            "isd_code": ["91"] * len(df),
+            "first_name": cleaned_names,
+            "last_name": "",
+            "grade": updated_grades,
+            "phone": df[phone_col],
+            "school_id": [school_id] * len(df),
+        })
+
+        safe_school_name = school_name.replace(" ", "_")
+        out_path = f"{safe_school_name}.csv"
+        output_df.to_csv(out_path, index=False)
+
+        return send_file(out_path, as_attachment=True)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# -------------------- CSV Setup --------------------
 CSV_FILE = "schools.csv"
 MATCHED_FILE = "matched_schools.csv"
 V2_FILE = "v2_data.csv"
 
-# Required Columns
 REQUIRED_COLS = [
-    "School Name", "Aff No", "Principal Name", "Principal Number",
-    "Principal Email", "School Email", "Address", "Website",
+    "School Name", "Aff No", "UDISE Code", "Principal Name", "Principal Number",
+    "Principal Email", "School Email", "Address", "Pincode", "Website",
     "Fee Structure", "Total Strength"
 ]
 
-# Ensure files exist
-if not os.path.exists(CSV_FILE):
-    pd.DataFrame(columns=REQUIRED_COLS).to_csv(CSV_FILE, index=False)
-if not os.path.exists(MATCHED_FILE):
-    pd.DataFrame(columns=["Aff No", "Person", "SCHOOL_ID"]).to_csv(MATCHED_FILE, index=False)
-if not os.path.exists(V2_FILE):
-    pd.DataFrame(columns=["SCHOOL_ID", "Type of Round", "Prelims Date", "Reg", "Part", "Rep"]).to_csv(V2_FILE, index=False)
+# Ensure CSV files exist
+for file, cols in [(CSV_FILE, REQUIRED_COLS), 
+                   (MATCHED_FILE, ["Aff No", "Person", "SCHOOL_ID"]),
+                   (V2_FILE, ["SCHOOL_ID", "Type of Round", "Prelims Date", "Reg", "Part", "Rep"])]:
+    if not os.path.exists(file):
+        pd.DataFrame(columns=cols).to_csv(file, index=False)
 
-# Load CSVs
-school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
-matched_df = pd.read_csv(MATCHED_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
-v2_df = pd.read_csv(V2_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
+# Reload CSVs
+def reload_dataframes():
+    global school_df, matched_df, v2_df
+    school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
+    matched_df = pd.read_csv(MATCHED_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("")
+    v2_df = pd.read_csv(V2_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
 
+reload_dataframes()
 
-# -------------------- Fetching from CBSE --------------------
+# -------------------- CBSE Fetch --------------------
 def fetch_from_cbse(aff_no):
-    """Fetch school info from CBSE Saras Portal"""
     try:
         url = f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
         resp = requests.get(url, timeout=10)
@@ -43,24 +101,18 @@ def fetch_from_cbse(aff_no):
             return None
 
         soup = BeautifulSoup(resp.text, "html.parser")
-
         def get_val(_id):
             el = soup.find(id=_id)
             return el.get_text(strip=True) if el else "Not Found"
 
         # Student strength
-        total_strength = 0
-        for i in range(1, 13):
-            val = get_val(f"lblstu{i}")
-            if val.isdigit():
-                total_strength += int(val)
+        total_strength = sum(int(get_val(f"lblstu{i}")) if get_val(f"lblstu{i}").isdigit() else 0 for i in range(1, 13))
 
         # Fee Structure
-        adm = int(get_val("lblsecadm") or 0) if get_val("lblsecadm").isdigit() else 0
-        dev = int(get_val("lblsecdev") or 0) if get_val("lblsecdev").isdigit() else 0
-        oth = int(get_val("lblsecoth") or 0) if get_val("lblsecoth").isdigit() else 0
-        tui = get_val("lblsectui")
-        tui = int(tui) if tui.isdigit() else 0
+        adm = int(get_val("lblsecadm")) if get_val("lblsecadm").isdigit() else 0
+        dev = int(get_val("lblsecdev")) if get_val("lblsecdev").isdigit() else 0
+        oth = int(get_val("lblsecoth")) if get_val("lblsecoth").isdigit() else 0
+        tui = int(get_val("lblsectui")) if get_val("lblsectui").isdigit() else 0
         if 0 < tui < 10000:
             tui *= 12
         fee_total = adm + dev + oth + tui
@@ -68,11 +120,13 @@ def fetch_from_cbse(aff_no):
         return {
             "school_name": get_val("lblsch_name"),
             "aff_no": aff_no,
+            "udise_code": get_val("txtudise"),
             "principal_name": get_val("lblprinci"),
             "principal_number": get_val("lblprincicon"),
             "principal_email": get_val("lblprinciemail"),
             "school_email": get_val("lblschemail"),
             "address": get_val("lbladd"),
+            "pincode": get_val("txtpin"),
             "website": get_val("lblschweb"),
             "fee_structure": str(fee_total),
             "total_strength": str(total_strength),
@@ -82,276 +136,172 @@ def fetch_from_cbse(aff_no):
         print("Error fetching CBSE:", e)
         return None
 
-
 # -------------------- Save to CSV --------------------
 def save_to_csv(data):
-    """Save new school data to schools.csv if not already present"""
-    global school_df
-    aff_no_val = str(data["aff_no"]).strip()
+    reload_dataframes()
+    aff_no_val = str(data.get("aff_no", "")).strip()
+    if aff_no_val == "":
+        return
     if not (school_df["Aff No"].astype(str).str.strip() == aff_no_val).any():
         new_row = pd.DataFrame([{
-            "School Name": data["school_name"],
-            "Aff No": data["aff_no"],
-            "Principal Name": data["principal_name"],
-            "Principal Number": data["principal_number"],
-            "Principal Email": data["principal_email"],
-            "School Email": data["school_email"],
-            "Address": data["address"],
-            "Website": data["website"],
-            "Fee Structure": data["fee_structure"],
-            "Total Strength": data["total_strength"],
+            "School Name": data.get("school_name", "Not Found"),
+            "Aff No": aff_no_val,
+            "UDISE Code": data.get("udise_code", "Not Found"),
+            "Principal Name": data.get("principal_name", "Not Found"),
+            "Principal Number": data.get("principal_number", "Not Found"),
+            "Principal Email": data.get("principal_email", "Not Found"),
+            "School Email": data.get("school_email", "Not Found"),
+            "Address": data.get("address", "Not Found"),
+            "Pincode": data.get("pincode", "Not Found"),
+            "Website": data.get("website", "Not Found"),
+            "Fee Structure": data.get("fee_structure", "Not Found"),
+            "Total Strength": data.get("total_strength", "Not Found"),
         }])
         new_row.to_csv(CSV_FILE, mode="a", header=False, index=False)
-        school_df = pd.read_csv(CSV_FILE, dtype=str, on_bad_lines="skip", engine="python").fillna("Not Found")
+        reload_dataframes()
 
-
-# -------------------- Flask Route --------------------
-@app.route("/", methods=["GET", "POST"])
-def index():
-    global school_df, matched_df, v2_df
-    data, error = None, None
-
-    if request.method == "POST":
-        aff_no = request.form.get("aff_no", "").strip()
-
-        if not aff_no:
-            error = "Please enter a valid Affiliation Number."
-        else:
-            # Fetch from Saras
-            data = fetch_from_cbse(aff_no)
-
-            if not data:
-                # If not found, check local CSV
-                row = school_df.loc[school_df["Aff No"] == aff_no]
-                if row.empty:
-                    error = "No information found for this Affiliation Number."
-                else:
-                    row = row.iloc[0]
-                    data = {
-                        "school_name": row["School Name"],
-                        "principal_name": row["Principal Name"],
-                        "principal_number": row["Principal Number"],
-                        "principal_email": row["Principal Email"],
-                        "school_email": row["School Email"],
-                        "address": row["Address"],
-                        "website": row["Website"],
-                        "fee_structure": row["Fee Structure"],
-                        "total_strength": row["Total Strength"],
-                        "saras_link": f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
-                    }
-            else:
-                save_to_csv(data)
-
-            # -------------------- Existing Lead + Journey --------------------
-            row = matched_df.loc[matched_df["Aff No"] == aff_no]
-            if not row.empty:
-                person = row.iloc[0].get("Person", "Assigned")
-                school_code = row.iloc[0].get("SCHOOL_ID", "")
-                data["lead_status"] = f"Existing Lead — with {person}"
-                data["school_code"] = school_code
-
-                # Journey Data
-                rounds_df = v2_df.loc[v2_df["SCHOOL_ID"] == school_code]
-                if not rounds_df.empty:
-                    rounds_df = rounds_df.drop_duplicates(
-                        subset=["Type of Round", "Prelims Date", "Reg", "Part", "Rep"]
-                    )
-                    rounds_df = rounds_df[~rounds_df["Rep"].str.lower().isin(["canceled", "duplicate"])]
-
-                    for col in ["Prelims Date", "Reg", "Part"]:
-                        if col in rounds_df.columns:
-                            rounds_df[col] = rounds_df[col].replace("", "Not Found").fillna("Not Found")
-                        else:
-                            rounds_df[col] = "Not Found"
-
-                    rounds_list = []
-                    for _, r in rounds_df.iterrows():
-                        rounds_list.append({
-                            "Type of Round": r["Type of Round"],
-                            "Prelims Date": r["Prelims Date"],
-                            "Reg": r["Reg"],
-                            "Part": r["Part"],
-                            "Rep": r["Rep"]
-                        })
-                    data["journey"] = rounds_list
-                    data["lead_owner"] = rounds_df.iloc[-1]["Rep"]
-
-                    # ✅ Eligible After calculation
-                    prelims_dates = []
-                    for r in rounds_list:
-                        date_str = r.get("Prelims Date")
-                        if date_str not in ["", "Not Found"]:
+# -------------------- Attach lead/journey --------------------
+def attach_lead_and_journey(data, aff_no):
+    reload_dataframes()
+    row = matched_df.loc[matched_df["Aff No"] == aff_no]
+    if not row.empty:
+        person = row.iloc[0].get("Person", "Assigned")
+        school_code = row.iloc[0].get("SCHOOL_ID", "")
+        data["lead_status"] = f"Existing Lead — with {person}"
+        data["school_code"] = school_code
+        if school_code:
+            rounds_df = v2_df.loc[v2_df["SCHOOL_ID"] == school_code]
+            if not rounds_df.empty:
+                rounds_df = rounds_df.drop_duplicates(subset=["Type of Round","Prelims Date","Reg","Part","Rep"])
+                rounds_df = rounds_df[~rounds_df["Rep"].str.lower().isin(["canceled","duplicate"])]
+                rounds_list = []
+                for _, r in rounds_df.iterrows():
+                    rounds_list.append({
+                        "Type of Round": r.get("Type of Round","Not Found"),
+                        "Prelims Date": r.get("Prelims Date","Not Found"),
+                        "Reg": r.get("Reg","Not Found"),
+                        "Part": r.get("Part","Not Found"),
+                        "Rep": r.get("Rep","Not Found")
+                    })
+                data["journey"] = rounds_list
+                data["lead_owner"] = rounds_df.iloc[-1].get("Rep","")
+                # eligible_after
+                prelims_dates = []
+                for r in rounds_list:
+                    date_str = r.get("Prelims Date")
+                    if date_str and date_str not in ["","Not Found"]:
+                        for fmt in ("%d-%b-%Y","%d-%m-%Y","%Y-%m-%d"):
                             try:
-                                prelims_dates.append(datetime.strptime(date_str, "%d-%b-%Y"))
-                            except ValueError:
-                                # fallback if date comes in numeric format
-                                try:
-                                    prelims_dates.append(datetime.strptime(date_str, "%d-%m-%Y"))
-                                except ValueError:
-                                    pass
+                                prelims_dates.append(datetime.strptime(date_str,fmt))
+                                break
+                            except: 
+                                continue
+                if prelims_dates:
+                    data["eligible_after"] = (max(prelims_dates)+timedelta(days=90)).strftime("%Y-%m-%d")
+                else:
+                    data["eligible_after"] = "Not Available"
+    return data
 
-                    if prelims_dates:
-                        latest_prelims = max(prelims_dates)
-                        data["eligible_after"] = (latest_prelims + timedelta(days=90)).strftime("%Y-%m-%d")
-                    else:
-                        data["eligible_after"] = "Not Available"
+# -------------------- API Routes --------------------
+@app.route("/api/school/<aff_no>", methods=["GET"])
+def get_school(aff_no):
+    aff_no = aff_no.strip()
+    if not aff_no:
+        return jsonify({"error": "Affiliation number required"}), 400
 
-    return render_template_string(HTML_PAGE, data=data, error=error)
+    data = fetch_from_cbse(aff_no)
+    if not data:
+        reload_dataframes()
+        row = school_df.loc[school_df["Aff No"]==aff_no]
+        if row.empty:
+            return jsonify({"error": "No information found"}),404
+        row = row.iloc[0]
+        data = {k.lower(): row.get(k,"Not Found") for k in school_df.columns}
+        data["aff_no"] = aff_no
+        data["saras_link"] = f"https://saras.cbse.gov.in/maps/finalreportDetail?AffNo={aff_no}"
+    else:
+        save_to_csv(data)
 
+    data = attach_lead_and_journey(data, aff_no)
+    return jsonify(data)
 
-# -------------------- HTML Template --------------------
-HTML_PAGE = """ 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>School Info Explorer</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-<style>
-body { font-family: 'Inter', sans-serif; background: #f3f4f6; margin:0; padding:20px; display:flex; justify-content:center; }
-.container { width: min(900px,100%); }
-.hero { text-align:center; margin-bottom:20px; }
-.title { font-size:32px; font-weight:700; margin-bottom:10px; }
-.subtitle { color:#555; margin-bottom:20px; }
-.search-wrap { display:flex; justify-content:center; }
-.search { width:100%; max-width:700px; display:flex; background:#fff; border-radius:50px; padding:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); }
-.search input { flex:1; border:none; padding:12px 16px; font-size:16px; border-radius:50px; outline:none; }
-.search button { background:linear-gradient(135deg, #2c7be5, #6c5ce7); border:none; color:#fff; font-weight:600; border-radius:50px; padding:12px 20px; cursor:pointer; }
+# -------------------- Prepare PDF --------------------
+@app.route("/api/prepare-pdf", methods=["POST"])
+def prepare_pdf():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
 
-.box { background:#fff; border-radius:14px; box-shadow:0 8px 20px rgba(0,0,0,0.1); padding:20px; margin-top:20px; }
-.box h2 { font-size:20px; margin-bottom:15px; border-bottom:2px solid #eee; padding-bottom:5px; }
-.info-row { margin:8px 0; }
-.label { font-weight:600; color:#444; }
-.value { margin-left:6px; color:#222; }
-a.mail-link { color:#2c7be5; text-decoration:none; font-weight:600; }
-a.mail-link:hover { text-decoration:underline; }
-.journey-table { width:100%; border-collapse:collapse; margin-top:10px; }
-.journey-table th, .journey-table td { border:1px solid #ccc; padding:6px 10px; text-align:left; }
-.journey-table th { background:#f0f0f0; }
+    file = request.files["file"]
+    school_name = request.form.get("school_name", "").strip()
+    exam_date = request.form.get("exam_date", "").strip()
+    exam_time = request.form.get("exam_time", "").strip()
 
-/* Popup styles */
-.popup-bg { display:none; position:fixed; top:0; left:0; width:100%; height:100%; backdrop-filter: blur(6px); background: rgba(0,0,0,0.4); justify-content:center; align-items:center; z-index:1000; }
-.popup { background:#fff; padding:20px; border-radius:12px; max-width:400px; width:90%; text-align:center; }
-.popup button { margin:10px; padding:10px 20px; font-size:16px; cursor:pointer; border:none; border-radius:6px; color:#fff; }
-.math-btn { background:#2c7be5; }
-.hots-btn { background:#f39c12; }
-.score-btn { background:#6c5ce7; }
-.close-btn { margin-top:15px; background:#888; }
-</style>
-</head>
-<body>
-<div class="container">
-<div class="hero">
-<h1 class="title">School Info Explorer</h1>
-<p class="subtitle">Enter Affiliation Number to fetch school details</p>
-<form class="search-wrap" method="post">
-<div class="search">
-<input name="aff_no" placeholder="Enter Affiliation Number" required value="" />
-<button type="submit">Search</button>
-</div>
-</form>
-{% if error %}
-<p style="color:red; margin-top:10px;"><strong>Error:</strong> {{ error }}</p>
-{% endif %}
-</div>
+    if not school_name or not exam_date or not exam_time:
+        return jsonify({"error": "All fields are required"}), 400
 
-{% if data %}
-<div class="box">
-<h2>School Details</h2>
-<div class="info-row"><span class="label">School Name:</span> <span class="value">{{ data.school_name }}</span></div>
-<div class="info-row"><span class="label">Principal:</span> <span class="value">{{ data.principal_name }}</span></div>
-<div class="info-row"><span class="label">Principal Contact:</span> <span class="value">{{ data.principal_number }}</span></div>
-<div class="info-row"><span class="label">Principal Email:</span> <a class="mail-link" href="mailto:{{ data.principal_email }}">{{ data.principal_email }}</a></div>
-<div class="info-row"><span class="label">School Email:</span> <a class="mail-link" href="mailto:{{ data.school_email }}">{{ data.school_email }}</a></div>
-<div class="info-row"><span class="label">Total Strength:</span> <span class="value">{{ data.total_strength }}</span></div>
-<div class="info-row"><span class="label">Fee Structure (Yearly):</span> <span class="value">{{ data.fee_structure }}</span></div>
-<div class="info-row">
-<button onclick="openMailPopup('{{ data.principal_email }}','{{ data.school_email }}','{{ data.school_name }}','{{ data.principal_name }}'); return false;">📧 Send Email</button>
-</div>
-</div>
+    try:
+        df = pd.read_excel(file)
+        df.columns = df.columns.str.strip().str.upper()
+        df["PASSWORD"] = "qwerty"
+        final_df = df[["NAME","GRADE","LOGIN ID","ATTEMPT"]]
+        grades = final_df["GRADE"].unique()
 
-<div class="box">
-<h2>Other Information</h2>
-<div class="info-row"><span class="label">Address:</span> <span class="value">{{ data.address }}</span></div>
-<div class="info-row"><span class="label">Website:</span> <a href="{{ data.website }}" target="_blank">{{ data.website }}</a></div>
-{% if data.school_code %}
-<div class="info-row"><span class="label">School Code:</span> <span class="value">{{ data.school_code }}</span></div>
-<div class="info-row"><span class="label">Lead Owner:</span> <span class="value">{{ data.lead_owner }}</span></div>
-<div class="info-row"><span class="label">Eligible After:</span> <span class="value">{{ data.eligible_after }}</span></div>
-{% endif %}
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer,'w') as zip_file:
+            for grade in grades:
+                grade_data = final_df[final_df["GRADE"]==grade]
 
-{% if data.journey %}
-<h3>Journey:</h3>
-<table class="journey-table">
-<tr>
-<th>Round</th><th>Prelims Date</th><th>Registration</th><th>Participation</th><th>Rep</th>
-</tr>
-{% for r in data.journey %}
-<tr>
-<td>{{ r['Type of Round'] }}</td>
-<td>{{ r['Prelims Date'] }}</td>
-<td>{{ r['Reg'] }}</td>
-<td>{{ r['Part'] }}</td>
-<td>{{ r['Rep'] }}</td>
-</tr>
-{% endfor %}
-</table>
-{% endif %}
+                pdf = FPDF()
+                pdf.add_page()
+                pdf.set_font("Arial",'B',14)
+                pdf.cell(200,10,school_name,ln=True,align="C")
+                pdf.cell(200,10,f"Exam Date: {exam_date} | Time: {exam_time}",ln=True,align="C")
+                pdf.cell(200,10,f"Grade: {grade}",ln=True,align="C")
+                pdf.ln(10)
 
-</div>
-{% endif %}
-</div>
+                # Table Header
+                pdf.set_font("Arial",'B',10)
+                headers = ["Name","Login","Grade","Login ID","Attempt"]
+                col_widths = [55,45,20,40,30]
+                pdf.set_fill_color(0,51,102)
+                pdf.set_text_color(255,255,255)
+                for i,h in enumerate(headers):
+                    pdf.cell(col_widths[i],10,h,border=1,align="C",fill=True)
+                pdf.ln()
+                pdf.set_text_color(0,0,0)
+                pdf.set_font("Arial",'',9)
 
-<!-- Mail template popup -->
-<div class="popup-bg" id="mailPopup">
-<div class="popup">
-<h3>Select Mail Template</h3>
-<button class="math-btn" onclick="sendMail('math')">MATH</button>
-<button class="hots-btn" onclick="sendMail('hots')">HOTS</button>
-<button class="score-btn" onclick="sendMail('score')">SCORE</button>
-<br>
-<button class="close-btn" onclick="closePopup()">Cancel</button>
-</div>
-</div>
+                for _,row in grade_data.iterrows():
+                    pdf.cell(col_widths[0],10,str(row["NAME"]),border="TB",align="C")
+                    link_url = f"https://genius.infinitylearn.com/deeplink/exampage?exam_status=scheduled&crnId=CRNP100T99999ZS11B75&eventId=68c554a4218f83652c697938&id={row['LOGIN ID']}&password=qwerty"
+                    pdf.set_text_color(0,51,153)
+                    pdf.cell(col_widths[1],10,"Click here to login",border="TB",align="C",link=link_url)
+                    pdf.set_text_color(0,0,0)
+                    pdf.cell(col_widths[2],10,str(row["GRADE"]),border="TB",align="C")
+                    pdf.cell(col_widths[3],10,str(row["LOGIN ID"]),border="TB",align="C")
+                    attempt_val = str(row["ATTEMPT"])
+                    if attempt_val.lower()=="no": pdf.set_text_color(200,0,0)
+                    elif attempt_val.lower()=="yes": pdf.set_text_color(0,150,0)
+                    pdf.cell(col_widths[4],10,attempt_val,border="TB",align="C")
+                    pdf.set_text_color(0,0,0)
+                    pdf.ln()
 
-<script>
-let currentMail = {};
-function openMailPopup(principalEmail, schoolEmail, schoolName, principalName){
-    currentMail = {principalEmail, schoolEmail, schoolName, principalName};
-    document.getElementById('mailPopup').style.display='flex';
-}
-function closePopup(){ document.getElementById('mailPopup').style.display='none'; }
+                pdf_bytes = BytesIO()
+                pdf.output(pdf_bytes)
+                pdf_bytes.seek(0)
+                zip_file.writestr(f"Grade_{grade}.pdf", pdf_bytes.read())
 
-function capitalizeFirstLetter(str){
-    return str.replace(/\\b\\w/g, c => c.toUpperCase());
-}
+        zip_buffer.seek(0)
+        return send_file(zip_buffer, as_attachment=True, download_name=f"{school_name}_PDFs.zip")
 
-function sendMail(template){
-    let subj="", body="";
-    let schoolName = capitalizeFirstLetter(currentMail.schoolName);
-    let principalName = capitalizeFirstLetter(currentMail.principalName);
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 
-    if(template==="math"){
-        subj="Invitation to Participate in MATH Test: Empowering Students through Assessment Excellence";
-        body=`Dear ${principalName},\\n\\nWe are delighted to invite ${schoolName} to participate in the MATH Test.\\nMode Of Exam: Online\\n\\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\\n\\nThanks & Regards,\\nName\\nDesignation\\n{user's mail id}`;
-    } else if(template==="hots"){
-        subj="Invitation to Participate in HOTS Test";
-        body=`Dear ${principalName},\\n\\nWe are delighted to invite ${schoolName} to participate in the HOTS Test.\\nMode Of Exam: Online\\n\\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\\n\\nThanks & Regards,\\nName\\nDesignation\\n{user's mail id}`;
-    } else if(template==="score"){
-        subj="Invitation to Participate in SCORE Test: Empowering Students through Assessment Excellence";
-        body=`Dear ${principalName},\\n\\nWe are delighted to invite ${schoolName} to participate in the SCORE Test.\\nMode Of Exam: Online\\n\\nMotive: This free initiative offers students valuable aptitude, decision-making, and critical thinking exposure.\\n\\nThanks & Regards,\\nName\\nDesignation\\n{user's mail id}`;
-    }
-
-    let mailtoLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${currentMail.principalEmail},${currentMail.schoolEmail}&su=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
-    window.open(mailtoLink,'_blank');
-    closePopup();
-}
-</script>
-</body>
-</html>
-"""
-
+# -------------------- Root Route --------------------
+@app.route("/", methods=["GET"])
+def home():
+    return render_template("index.html")
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True)

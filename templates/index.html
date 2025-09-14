@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Single Page App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .box {
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+        padding: 18px;
+        margin-top: 16px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .label {
+        font-weight: 600;
+        color: #444;
+      }
+      .value {
+        margin-left: 6px;
+        color: #222;
+      }
+      .journey-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .journey-table th,
+      .journey-table td {
+        border: 1px solid #e6e6e6;
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 13px;
+      }
+      .journey-table th {
+        background: #fafafa;
+        font-weight: 600;
+      }
+      .popup-bg {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        backdrop-filter: blur(6px);
+        background: rgba(0, 0, 0, 0.35);
+        justify-content: center;
+        align-items: center;
+        z-index: 50;
+      }
+      .popup {
+        background: #fff;
+        padding: 18px;
+        border-radius: 12px;
+        max-width: 420px;
+        width: 92%;
+        text-align: center;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+      }
+      .popup button {
+        margin: 8px;
+        padding: 10px 16px;
+        font-size: 14px;
+        cursor: pointer;
+        border: none;
+        border-radius: 8px;
+        color: #fff;
+      }
+      .math-btn {
+        background: #2c7be5;
+      }
+      .hots-btn {
+        background: #f39c12;
+      }
+      .score-btn {
+        background: #6c5ce7;
+      }
+      .close-btn {
+        background: #888;
+        color: #fff;
+        padding: 8px 14px;
+        border-radius: 8px;
+        margin-top: 10px;
+      }
+      .box {
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
+        padding: 18px;
+        margin-top: 16px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+      .label {
+        font-weight: 600;
+        color: #444;
+      }
+      .value {
+        margin-left: 6px;
+        color: #222;
+      }
+      .journey-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+      }
+      .journey-table th,
+      .journey-table td {
+        border: 1px solid #e6e6e6;
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 13px;
+      }
+      .journey-table th {
+        background: #fafafa;
+        font-weight: 600;
+      }
+      .popup-bg {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        backdrop-filter: blur(6px);
+        background: rgba(0, 0, 0, 0.35);
+        justify-content: center;
+        align-items: center;
+        z-index: 50;
+      }
+      .popup {
+        background: #fff;
+        padding: 18px;
+        border-radius: 12px;
+        max-width: 420px;
+        width: 92%;
+        text-align: center;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.12);
+      }
+      .popup button {
+        margin: 8px;
+        padding: 10px 16px;
+        font-size: 14px;
+        cursor: pointer;
+        border: none;
+        border-radius: 8px;
+        color: #fff;
+      }
+      .math-btn {
+        background: #2c7be5;
+      }
+      .hots-btn {
+        background: #f39c12;
+      }
+      .score-btn {
+        background: #6c5ce7;
+      }
+      .close-btn {
+        background: #888;
+        color: #fff;
+        padding: 8px 14px;
+        border-radius: 8px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body class="bg-slate-50">
+    <div id="root"></div>
+
+    <!-- React + Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    {% raw %}
+    <script type="text/babel">
+      function App() {
+        const pages = [
+          { id: "explore", title: "Explore Schools" },
+          { id: "prepare-data", title: "Prepare Data to Add" },
+          { id: "prepare-pdf", title: "Prepare Class Wise PDF" },
+          { id: "campaign", title: "Prepare Campaign Sheet" },
+        ];
+        const [active, setActive] = React.useState("explore");
+
+        return (
+          <div className="min-h-screen bg-slate-50 text-slate-900">
+            <div className="max-w-[1200px] mx-auto p-4">
+              <div className="flex gap-6">
+                <aside className="w-64 bg-white rounded-2xl shadow-md p-4 sticky top-6 h-[calc(100vh-48px)]">
+                  <h1 className="text-xl font-semibold mb-2">Admin Panel</h1>
+                  <p className="text-sm text-slate-500 mb-4">Quick access</p>
+                  <nav className="flex flex-col gap-1">
+                    {pages.map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setActive(p.id)}
+                        className={
+                          "text-left px-3 py-2 rounded-lg transition-all w-full hover:bg-slate-100 flex items-center gap-3 " +
+                          (active === p.id
+                            ? "bg-sky-50 ring-1 ring-sky-200"
+                            : "")
+                        }
+                      >
+                        <span className="flex-1">{p.title}</span>
+                        {active === p.id && (
+                          <span className="text-xs text-sky-600 font-medium">
+                            Active
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </nav>
+                </aside>
+
+                <main className="flex-1">
+                  <header className="mb-6 flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-semibold">
+                        {pages.find((p) => p.id === active).title}
+                      </h2>
+                    </div>
+                  </header>
+
+                  <section className="bg-white rounded-2xl shadow-sm p-6">
+                    {active === "explore" && <ExploreSchools />}
+                    {active === "prepare-data" && <PrepareData />}
+                    {active === "prepare-pdf" && <PreparePDF />}
+                    {active === "campaign" && <PrepareCampaign />}
+                    {active === "reg-form" && <RegForm />}
+                  </section>
+                </main>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ✅ School Explorer (same as your working version)
+      function ExploreSchools() {
+        const [affNo, setAffNo] = React.useState("");
+        const [school, setSchool] = React.useState(null);
+        const [error, setError] = React.useState("");
+        const [loading, setLoading] = React.useState(false);
+        const [currentMail, setCurrentMail] = React.useState({});
+
+        const fetchSchool = async () => {
+          if (!affNo.trim()) {
+            setError("Enter an affiliation number");
+            setSchool(null);
+            return;
+          }
+          setLoading(true);
+          try {
+            const res = await fetch(
+              `/api/school/${encodeURIComponent(affNo.trim())}`
+            );
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}));
+              setError(err.error || "Not found");
+              setSchool(null);
+            } else {
+              const data = await res.json();
+              setSchool(data);
+              setError("");
+            }
+          } catch {
+            setError("Failed to fetch data");
+            setSchool(null);
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        const openMailPopup = (
+          principalEmail,
+          schoolEmail,
+          schoolName,
+          principalName
+        ) => {
+          setCurrentMail({
+            principalEmail,
+            schoolEmail,
+            schoolName,
+            principalName,
+          });
+          document.getElementById("mailPopup").style.display = "flex";
+        };
+        const closePopup = () => {
+          document.getElementById("mailPopup").style.display = "none";
+        };
+
+        const sendMail = (template) => {
+          const { principalEmail, schoolEmail, schoolName, principalName } =
+            currentMail;
+          let subj = "",
+            body = "";
+          if (template === "math") {
+            subj = "Invitation to Participate in MATH Test";
+            body = `Dear ${principalName},\n\nWe invite ${schoolName} to participate in the MATH Test.\nMode: Online\n\nRegards,\nTeam`;
+          } else if (template === "hots") {
+            subj = "Invitation to Participate in HOTS Test";
+            body = `Dear ${principalName},\n\nWe invite ${schoolName} to participate in the HOTS Test.\nMode: Online\n\nRegards,\nTeam`;
+          } else if (template === "score") {
+            subj = "Invitation to Participate in SCORE Test";
+            body = `Dear ${principalName},\n\nWe invite ${schoolName} to participate in the SCORE Test.\nMode: Online\n\nRegards,\nTeam`;
+          }
+          const mailto = `mailto:${encodeURIComponent(
+            principalEmail
+          )}?cc=${encodeURIComponent(schoolEmail)}&subject=${encodeURIComponent(
+            subj
+          )}&body=${encodeURIComponent(body)}`;
+          window.location.href = mailto;
+          closePopup();
+        };
+
+        return (
+          <div>
+            <div className="flex gap-3 mb-4">
+              <input
+                value={affNo}
+                onChange={(e) => setAffNo(e.target.value)}
+                placeholder="Enter Affiliation Number"
+                className="border rounded-md p-2 flex-1"
+              />
+              <button
+                onClick={fetchSchool}
+                className="px-4 py-2 bg-sky-600 text-white rounded-md"
+              >
+                {loading ? "Searching..." : "Search"}
+              </button>
+            </div>
+
+            {error && <p className="text-red-500">{error}</p>}
+
+            {school && (
+              <>
+                <div className="box">
+                  <h2 className="title">School Details</h2>
+                  <p>
+                    <span className="label">School Name:</span>{" "}
+                    <span className="value">{school.school_name}</span>
+                  </p>
+                  <p>
+                    <span className="label">UDISE:</span>{" "}
+                    <span className="value">{school.udise_code}</span>
+                  </p>
+                  <p>
+                    <span className="label">Principal:</span>{" "}
+                    <span className="value">{school.principal_name}</span>
+                  </p>
+                  <p>
+                    <span className="label">Principal Contact:</span>{" "}
+                    <span className="value">{school.principal_number}</span>
+                  </p>
+                  <p>
+                    <span className="label">Principal Email:</span>{" "}
+                    <span className="value">{school.principal_email}</span>
+                  </p>
+                  <p>
+                    <span className="label">School Email:</span>{" "}
+                    <span className="value">{school.school_email}</span>
+                  </p>
+                  <p>
+                    <span className="label">Strength:</span>{" "}
+                    <span className="value">{school.total_strength}</span>
+                  </p>
+                  <p>
+                    <span className="label">Fee:</span>{" "}
+                    <span className="value">{school.fee_structure}</span>
+                  </p>
+                  <button
+                    onClick={() =>
+                      openMailPopup(
+                        school.principal_email,
+                        school.school_email,
+                        school.school_name,
+                        school.principal_name
+                      )
+                    }
+                    className="mt-2 px-3 py-2 border rounded-md"
+                  >
+                    📧 Send Email
+                  </button>
+                </div>
+
+                <div className="box">
+                  <h2 className="title">Other Info</h2>
+                  <p>
+                    <span className="label">Address:</span>{" "}
+                    <span className="value">{school.address}</span>
+                  </p>
+                  <p>
+                    <span className="label">Pincode:</span>{" "}
+                    <span className="value">{school.pincode}</span>
+                  </p>
+                  <p>
+                    <span className="label">Website:</span>
+                    <a
+                      href={school.website}
+                      target="_blank"
+                      className="value text-sky-600 underline"
+                    >
+                      {school.website}
+                    </a>
+                  </p>
+                  {school.school_code && (
+                    <>
+                      <p>
+                        <span className="label">School Code:</span>{" "}
+                        <span className="value">{school.school_code}</span>
+                      </p>
+                      <p>
+                        <span className="label">Lead Owner:</span>{" "}
+                        <span className="value">{school.lead_owner}</span>
+                      </p>
+                      <p>
+                        <span className="label">Eligible After:</span>{" "}
+                        <span className="value">{school.eligible_after}</span>
+                      </p>
+                    </>
+                  )}
+                  {school.journey && school.journey.length > 0 && (
+                    <table className="journey-table mt-3">
+                      <thead>
+                        <tr>
+                          <th>Round</th>
+                          <th>Prelims</th>
+                          <th>Reg</th>
+                          <th>Part</th>
+                          <th>Rep</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {school.journey.map((r, i) => (
+                          <tr key={i}>
+                            <td>{r["Type of Round"]}</td>
+                            <td>{r["Prelims Date"]}</td>
+                            <td>{r["Reg"]}</td>
+                            <td>{r["Part"]}</td>
+                            <td>{r["Rep"]}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </>
+            )}
+
+            <div className="popup-bg" id="mailPopup">
+              <div className="popup">
+                <h3 className="text-lg font-semibold mb-2">
+                  Select Mail Template
+                </h3>
+                <button className="math-btn" onClick={() => sendMail("math")}>
+                  MATH
+                </button>
+                <button className="hots-btn" onClick={() => sendMail("hots")}>
+                  HOTS
+                </button>
+                <button className="score-btn" onClick={() => sendMail("score")}>
+                  SCORE
+                </button>
+                <br />
+                <button className="close-btn" onClick={closePopup}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // ✅ Prepare Data (with School ID, School Name, Class Offset, File Upload)
+      function PrepareData() {
+        const [file, setFile] = React.useState(null);
+        const [schoolId, setSchoolId] = React.useState("");
+        const [schoolName, setSchoolName] = React.useState("");
+        const [classOffset, setClassOffset] = React.useState(0);
+        const [message, setMessage] = React.useState("");
+
+        const requiredCols = [
+          "Name Of The Student",
+          "Class",
+          "WhatsApp No (Provide your correct WhatsApp Number)\n(Login Id & password Will Be Shared On whatsapp Only)",
+        ];
+
+        const handleUpload = async () => {
+          if (!file || !schoolId || !schoolName) {
+            setMessage("⚠️ Please fill all fields and choose a file.");
+            return;
+          }
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("school_id", schoolId);
+          formData.append("school_name", schoolName);
+          formData.append("class_offset", classOffset);
+
+          const res = await fetch("/api/prepare-data", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (res.ok) {
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = schoolName.replace(/\s+/g, "_") + ".csv";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setMessage("✅ Processed file downloaded.");
+          } else {
+            const err = await res.json();
+            setMessage("❌ Error: " + err.error);
+          }
+        };
+
+        return (
+          <div className="box">
+            <h3 className="title">Prepare Student Data</h3>
+            <p className="text-sm text-slate-500 mb-3">
+              Upload your Excel file. It must contain these columns:
+            </p>
+            <ul className="list-disc list-inside text-sm mb-3">
+              {requiredCols.map((col) => (
+                <li key={col}>{col}</li>
+              ))}
+            </ul>
+
+            <input
+              type="text"
+              placeholder="Enter School ID"
+              value={schoolId}
+              onChange={(e) => setSchoolId(e.target.value)}
+              className="border rounded-md p-2 w-full mb-2"
+            />
+            <input
+              type="text"
+              placeholder="Enter School Name"
+              value={schoolName}
+              onChange={(e) => setSchoolName(e.target.value)}
+              className="border rounded-md p-2 w-full mb-2"
+            />
+            <input
+              type="number"
+              placeholder="Classes to Add (e.g. 0)"
+              value={classOffset}
+              onChange={(e) => setClassOffset(e.target.value)}
+              className="border rounded-md p-2 w-full mb-2"
+            />
+
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files[0])}
+              className="mb-3"
+            />
+            <br />
+            <button
+              onClick={handleUpload}
+              className="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700"
+            >
+              Upload & Process
+            </button>
+
+            {message && <p className="mt-3 text-sm">{message}</p>}
+          </div>
+        );
+      }
+
+      function PreparePDF() {
+        const [file, setFile] = React.useState(null);
+        const [schoolName, setSchoolName] = React.useState("");
+        const [examDate, setExamDate] = React.useState("");
+        const [examTime, setExamTime] = React.useState("");
+        const [message, setMessage] = React.useState("");
+
+        const handleUpload = async () => {
+          if (!file || !schoolName || !examDate || !examTime) {
+            setMessage("⚠️ Fill all fields and choose a file.");
+            return;
+          }
+
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("school_name", schoolName);
+          formData.append("exam_date", examDate);
+          formData.append("exam_time", examTime);
+
+          const res = await fetch("/api/prepare-pdf", {
+            method: "POST",
+            body: formData,
+          });
+          if (res.ok) {
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = schoolName.replace(/\s+/g, "_") + "_PDFs.zip";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setMessage("✅ PDFs created and downloaded!");
+          } else {
+            const err = await res.json();
+            setMessage("❌ Error: " + err.error);
+          }
+        };
+
+        return (
+          <div className="box">
+            <h3 className="title">Prepare Class Wise PDF</h3>
+            <input
+              type="text"
+              placeholder="Enter School Name"
+              value={schoolName}
+              onChange={(e) => setSchoolName(e.target.value)}
+              className="border rounded-md p-2 w-full mb-2"
+            />
+            <input
+              type="text"
+              placeholder="Enter Exam Date"
+              value={examDate}
+              onChange={(e) => setExamDate(e.target.value)}
+              className="border rounded-md p-2 w-full mb-2"
+            />
+            <input
+              type="text"
+              placeholder="Enter Exam Time"
+              value={examTime}
+              onChange={(e) => setExamTime(e.target.value)}
+              className="border rounded-md p-2 w-full mb-2"
+            />
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => setFile(e.target.files[0])}
+              className="mb-3"
+            />
+            <br />
+            <button
+              onClick={handleUpload}
+              className="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700"
+            >
+              Upload & Generate PDFs
+            </button>
+            {message && <p className="mt-3 text-sm">{message}</p>}
+          </div>
+        );
+      }
+      function PrepareCampaign() {
+        return <div className="box">Coming soon…</div>;
+      }
+      function RegForm() {
+        return <div className="box">Coming soon…</div>;
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+    {% endraw %}
+  </body>
+</html>
