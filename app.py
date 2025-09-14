@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, send_file
+app = Flask(__name__)
 import pandas as pd
 from io import BytesIO
 import os, re
@@ -7,6 +8,7 @@ import requests
 from datetime import datetime, timedelta
 import zipfile
 from fpdf import FPDF  # <-- Added import for FPDF
+
 
 app = Flask(__name__)
 
