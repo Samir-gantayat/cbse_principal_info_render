@@ -1,5 +1,5 @@
-flask
+Flask
+pandas
 requests
 beautifulsoup4
 gunicorn
-pandas
