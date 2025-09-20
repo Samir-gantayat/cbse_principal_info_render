@@ -250,48 +250,47 @@ def prepare_pdf():
 
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer,'w') as zip_file:
-            for grade in grades:
-                grade_data = final_df[final_df["GRADE"]==grade]
+                for grade in grades:
+                    grade_data = final_df[final_df["GRADE"]==grade]
 
-                pdf = FPDF()
-                pdf.add_page()
-                pdf.set_font("Arial",'B',14)
-                pdf.cell(200,10,school_name,ln=True,align="C")
-                pdf.cell(200,10,f"Exam Date: {exam_date} | Time: {exam_time}",ln=True,align="C")
-                pdf.cell(200,10,f"Grade: {grade}",ln=True,align="C")
-                pdf.ln(10)
+                    pdf = FPDF()
+                    pdf.add_page()
+                    pdf.set_font("Arial",'B',14)
+                    pdf.cell(200,10,school_name,ln=True,align="C")
+                    pdf.cell(200,10,f"Exam Date: {exam_date} | Time: {exam_time}",ln=True,align="C")
+                    pdf.cell(200,10,f"Grade: {grade}",ln=True,align="C")
+                    pdf.ln(10)
 
-                # Table Header
-                pdf.set_font("Arial",'B',10)
-                headers = ["Name","Login","Grade","Login ID","Attempt"]
-                col_widths = [55,45,20,40,30]
-                pdf.set_fill_color(0,51,102)
-                pdf.set_text_color(255,255,255)
-                for i,h in enumerate(headers):
-                    pdf.cell(col_widths[i],10,h,border=1,align="C",fill=True)
-                pdf.ln()
-                pdf.set_text_color(0,0,0)
-                pdf.set_font("Arial",'',9)
-
-                for _,row in grade_data.iterrows():
-                    pdf.cell(col_widths[0],10,str(row["NAME"]),border="TB",align="C")
-                    link_url = f"https://genius.infinitylearn.com/deeplink/exampage?exam_status=scheduled&crnId=CRNP100T99999ZS11B75&eventId=68c554a4218f83652c697938&id={row['LOGIN ID']}&password=qwerty"
-                    pdf.set_text_color(0,51,153)
-                    pdf.cell(col_widths[1],10,"Click here to login",border="TB",align="C",link=link_url)
-                    pdf.set_text_color(0,0,0)
-                    pdf.cell(col_widths[2],10,str(row["GRADE"]),border="TB",align="C")
-                    pdf.cell(col_widths[3],10,str(row["LOGIN ID"]),border="TB",align="C")
-                    attempt_val = str(row["ATTEMPT"])
-                    if attempt_val.lower()=="no": pdf.set_text_color(200,0,0)
-                    elif attempt_val.lower()=="yes": pdf.set_text_color(0,150,0)
-                    pdf.cell(col_widths[4],10,attempt_val,border="TB",align="C")
-                    pdf.set_text_color(0,0,0)
+                    # Table Header
+                    pdf.set_font("Arial",'B',10)
+                    headers = ["Name","Login","Grade","Login ID","Attempt"]
+                    col_widths = [55,45,20,40,30]
+                    pdf.set_fill_color(0,51,102)
+                    pdf.set_text_color(255,255,255)
+                    for i,h in enumerate(headers):
+                        pdf.cell(col_widths[i],10,h,border=1,align="C",fill=True)
                     pdf.ln()
+                    pdf.set_text_color(0,0,0)
+                    pdf.set_font("Arial",'',9)
 
-                pdf_bytes = BytesIO()
-                pdf.output(pdf_bytes)
-                pdf_bytes.seek(0)
-                zip_file.writestr(f"Grade_{grade}.pdf", pdf_bytes.read())
+                    for _,row in grade_data.iterrows():
+                        pdf.cell(col_widths[0],10,str(row["NAME"]),border="TB",align="C")
+                        link_url = f"https://genius.infinitylearn.com/deeplink/exampage?exam_status=scheduled&crnId=CRNP100T99999ZS11B75&eventId=68c554a4218f83652c697938&id={row['LOGIN ID']}&password=qwerty"
+                        pdf.set_text_color(0,51,153)
+                        pdf.cell(col_widths[1],10,"Click here to login",border="TB",align="C",link=link_url)
+                        pdf.set_text_color(0,0,0)
+                        pdf.cell(col_widths[2],10,str(row["GRADE"]),border="TB",align="C")
+                        pdf.cell(col_widths[3],10,str(row["LOGIN ID"]),border="TB",align="C")
+                        attempt_val = str(row["ATTEMPT"])
+                        if attempt_val.lower()=="no": pdf.set_text_color(200,0,0)
+                        elif attempt_val.lower()=="yes": pdf.set_text_color(0,150,0)
+                        pdf.cell(col_widths[4],10,attempt_val,border="TB",align="C")
+                        pdf.set_text_color(0,0,0)
+                        pdf.ln()
+
+                    # ✅ Fix here
+                    pdf_content = pdf.output(dest="S").encode("latin1")
+                    zip_file.writestr(f"Grade_{grade}.pdf", pdf_content)
 
         zip_buffer.seek(0)
         return send_file(zip_buffer, as_attachment=True, download_name=f"{school_name}_PDFs.zip")
